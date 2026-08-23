@@ -25,6 +25,8 @@ class AgentState(TypedDict):
     integration_result: Optional[dict]
     report: Optional[str]
 
+import time
+
 def planner_node(state: AgentState) -> dict:
     goal = state.get("goal")
     cancer_type = state.get("cancer_type")
@@ -48,39 +50,62 @@ Return ONLY the JSON list. No explanation.'''
             temperature=0, 
         )
         raw = response.choices[0].message.content.strip()
+        
+        # --- NEW: Show the user what the AI is thinking ---
+        print("\n[AI Planner Thinking...]")
+        print(f"Raw Output from LLM:\n{raw}")
 
         match = re.search(r'\[.*\]', raw, re.DOTALL)
         raw_json = match.group(0) if match else raw
         steps = json.loads(raw_json)
         
+        print(f"-> Extracted Plan: {steps}\n")
+        
     except Exception as e:
+        print(f"\n[AI Planner Error] Failed to parse plan: {e}")
         steps = [] # Invalid plan to fail validation
     
     return {"plan": steps}
 
 def validator_node(state: AgentState) -> dict:
+    print("\n" + "-"*50)
+    print("🛡️ [VALIDATOR AGENT] Inspecting the Planner's Work...")
     plan = state.get("plan", [])
     retry_count = state.get("retry_count", 0)
     
     is_valid = True
     if not isinstance(plan, list) or len(plan) == 0:
+        print("  -> ERROR: Plan is empty or not a valid JSON list.")
         is_valid = False
     elif not all(s in VALID_TOOLS for s in plan):
+        print(f"  -> ERROR: Plan contains unknown tools. Only these are allowed: {VALID_TOOLS}")
         is_valid = False
         
     if not is_valid:
         retry_count += 1
+        print(f"  -> Result: ❌ Plan REJECTED. Retry count is now {retry_count}.")
+    else:
+        print("  -> Result: ✅ Plan APPROVED! All tools are valid.")
+    print("-"*50)
         
     return {"plan_valid": is_valid, "retry_count": retry_count}
 
 def route_after_validation(state: AgentState) -> str:
+    print("\n" + "-"*50)
+    print("🔀 [ORCHESTRATOR] Routing tasks based on validation...")
     if state.get("plan_valid"):
+        print("  -> Decision: Proceeding to Python Execution Phase.")
+        print("-"*50 + "\n")
         return "mutation_node"
     
     if state.get("retry_count", 0) < 2:
+        print("  -> Decision: Sending request BACK to AI Planner to fix the mistake.")
+        print("-"*50 + "\n")
         return "planner_node"
     
     # Fallback to the default 3-tool plan and proceed
+    print("  -> Decision: Maximum retries reached. Activating safe fallback plan.")
+    print("-"*50 + "\n")
     state["plan"] = DEFAULT_PLAN.copy()
     state["plan_valid"] = True
     return "mutation_node"
@@ -97,8 +122,9 @@ def mutation_node(state: AgentState) -> dict:
     analyzer = MutationAnalyzer(DATA_PATHS[cancer_type]['mutations'])
     summary = analyzer.summarize()
     
-    # Save chart to disk
-    analyzer.plot_top_genes(save_path=f'data/processed/{cancer_type}_mutations.png')
+    # Save chart to disk with a timestamp to prevent overwriting
+    timestamp = int(time.time())
+    analyzer.plot_top_genes(save_path=f'data/processed/{cancer_type}_mutations_{timestamp}.png')
     
     return {"mutation_result": summary}
 
@@ -115,8 +141,9 @@ def expression_node(state: AgentState) -> dict:
     results_df = analyzer.run_differential_expression()
     summary = analyzer.summarize(results_df)
     
-    # Save chart to disk
-    analyzer.plot_volcano(results_df, save_path=f'data/processed/{cancer_type}_volcano.png')
+    # Save chart to disk with a timestamp to prevent overwriting
+    timestamp = int(time.time())
+    analyzer.plot_volcano(results_df, save_path=f'data/processed/{cancer_type}_volcano_{timestamp}.png')
     
     return {"expression_result": summary}
 

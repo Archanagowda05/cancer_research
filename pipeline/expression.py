@@ -13,6 +13,8 @@ class ExpressionAnalyzer:
     """
     def __init__(self, expression_path: str):
         raw = pd.read_csv(expression_path, sep='\t', index_col=0)
+        # Fix: Drop duplicate gene symbols which cause 2D arrays and crash the t-test
+        raw = raw[~raw.index.duplicated(keep='first')]
         self.expr = raw.apply(pd.to_numeric, errors='coerce').dropna(how='all')
         self.expr_log = np.log2(self.expr + 1) # standard RNA-seq variance stabilization
         print(f'Loaded {len(self.expr):,} genes x {self.expr.shape[1]:,} samples')
