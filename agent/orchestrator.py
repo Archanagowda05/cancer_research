@@ -86,16 +86,93 @@ def route_after_validation(state: AgentState) -> str:
     return "mutation_node"
 
 def mutation_node(state: AgentState) -> dict:
-    return {}
+    if "run_mutation_analysis" not in state.get("plan", []):
+        return {}
+    
+    print("[Agent] Running Mutation Analysis...")
+    from pipeline.mutation import MutationAnalyzer
+    from config import DATA_PATHS
+    
+    cancer_type = state.get("cancer_type")
+    analyzer = MutationAnalyzer(DATA_PATHS[cancer_type]['mutations'])
+    summary = analyzer.summarize()
+    
+    # Save chart to disk
+    analyzer.plot_top_genes(save_path=f'data/processed/{cancer_type}_mutations.png')
+    
+    return {"mutation_result": summary}
 
 def expression_node(state: AgentState) -> dict:
-    return {}
+    if "run_expression_analysis" not in state.get("plan", []):
+        return {}
+        
+    print("[Agent] Running Expression Analysis...")
+    from pipeline.expression import ExpressionAnalyzer
+    from config import DATA_PATHS
+    
+    cancer_type = state.get("cancer_type")
+    analyzer = ExpressionAnalyzer(DATA_PATHS[cancer_type]['expression'])
+    results_df = analyzer.run_differential_expression()
+    summary = analyzer.summarize(results_df)
+    
+    # Save chart to disk
+    analyzer.plot_volcano(results_df, save_path=f'data/processed/{cancer_type}_volcano.png')
+    
+    return {"expression_result": summary}
 
 def integrator_node(state: AgentState) -> dict:
-    return {}
+    if "run_integration" not in state.get("plan", []):
+        return {}
+        
+    print("[Agent] Running Multi-Omics Integration...")
+    from pipeline.integrator import MultiOmicsIntegrator
+    
+    mut_summary = state.get("mutation_result")
+    exp_summary = state.get("expression_result")
+    
+    # Skip if previous steps failed or weren't run
+    if not mut_summary or not exp_summary:
+        print("[Agent] Skipping integration (missing mutation or expression results)")
+        return {}
+        
+    integrator = MultiOmicsIntegrator(mut_summary, exp_summary)
+    report = integrator.generate_report()
+    
+    return {"integration_result": report}
 
 def synthesizer_node(state: AgentState) -> dict:
-    return {}
+    goal = state.get("goal")
+    cancer_type = state.get("cancer_type")
+    
+    print("[Agent] Synthesizing final biological report...")
+    
+    # Bundle all the numeric results into text
+    summary_text = f'''
+Cancer Type: {cancer_type}
+Goal: {goal}
+MUTATION RESULTS: {json.dumps(state.get('mutation_result', {}), indent=2)}
+EXPRESSION RESULTS: {json.dumps(state.get('expression_result', {}), indent=2)}
+INTEGRATION RESULTS: {json.dumps(state.get('integration_result', {}).get('convergent_genes', {}), indent=2)}
+'''
+
+    prompt = f'''You are a cancer bioinformatics expert.
+Based on the following multi-omics analysis results, write a clear,
+structured biological interpretation. Include:
+1. Key findings from mutation analysis
+2. Key findings from gene expression analysis
+3. Integrated insights (convergent genes)
+4. Biological hypothesis and clinical significance
+Keep it under 300 words. Be specific about gene names.
+
+{summary_text}'''
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{'role': 'user', 'content': prompt}],
+        temperature=0.2,
+    )
+    
+    return {"report": response.choices[0].message.content}
 
 workflow = StateGraph(AgentState)
 
