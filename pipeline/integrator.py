@@ -8,14 +8,23 @@ class MultiOmicsIntegrator:
         self.exp = exp_summary
 
     def find_convergent_genes(self) -> dict:
-        mut_genes = set(self.mut.get('top_10_genes', []))
+        # Instead of just top 20, use top 500 genes for a meaningful overlap space
+        all_mut = self.mut.get('all_mutated_genes', self.mut.get('top_10_genes', []))
+        mut_genes = set(all_mut[:500])
+        
         up_genes = set(self.exp.get('top_upregulated', []))
         down_genes = set(self.exp.get('top_downregulated', []))
         all_deg = up_genes | down_genes
+        
+        # We also want to showcase priority ones for the UI (so it doesn't get flooded)
+        # So for mut_only, we just take the absolute top ones
+        mut_only = [g for g in all_mut if g not in all_deg]
+        
+        # Sort overlapping genes by mutation frequency implicitly (since we check against sorted lists)
         return {
-            'mutated_AND_upregulated': sorted(mut_genes & up_genes),
-            'mutated_AND_downregulated': sorted(mut_genes & down_genes),
-            'mutated_only': sorted(mut_genes - all_deg),
+            'mutated_AND_upregulated': [g for g in all_mut[:500] if g in up_genes],
+            'mutated_AND_downregulated': [g for g in all_mut[:500] if g in down_genes],
+            'mutated_only': mut_only[:50],
             'deg_only': sorted(all_deg - mut_genes),
             'total_mutation_genes': len(mut_genes),
             'total_deg_genes': len(all_deg),

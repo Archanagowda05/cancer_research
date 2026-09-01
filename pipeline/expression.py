@@ -69,11 +69,35 @@ class ExpressionAnalyzer:
 
     def summarize(self, results_df) -> dict:
         sig = results_df[results_df['significant']]
+        up_sig = sig[sig['log2FoldChange'] > 0]
+        dn_sig = sig[sig['log2FoldChange'] < 0]
+        
+        up_genes = self.get_top_degs(results_df, 'up', 10)
+        dn_genes = self.get_top_degs(results_df, 'down', 10)
+        
+        all_up = up_sig['Gene'].tolist()
+        all_dn = dn_sig['Gene'].tolist()
+
+        # Build volcano data — sample to keep response manageable (≤600 pts)
+        sample_df = results_df.sample(min(580, len(results_df)), random_state=42)
+        named_df  = results_df[results_df['Gene'].isin(up_genes + dn_genes)]
+        volcano_df = pd.concat([sample_df, named_df]).drop_duplicates('Gene')
+        named_set = set(up_genes + dn_genes)
+        volcano_data = [
+            {'gene': row['Gene'],
+             'x': round(float(row['log2FoldChange']), 3),
+             'y': round(float(-np.log10(max(float(row['pvalue']), 1e-300))), 3),
+             'sig': bool(row['significant']),
+             'dir': 'up' if row['log2FoldChange'] > 0 else 'dn',
+             'named': row['Gene'] in named_set}
+            for _, row in volcano_df.iterrows()
+        ]
         return {
             'total_genes_tested': len(results_df),
             'significant_degs': len(sig),
-            'upregulated_count': int((sig['log2FoldChange'] > 0).sum()),
-            'downregulated_count': int((sig['log2FoldChange'] < 0).sum()),
-            'top_upregulated': self.get_top_degs(results_df, 'up', 10),
-            'top_downregulated': self.get_top_degs(results_df, 'down', 10),
+            'upregulated_count': len(up_sig),
+            'downregulated_count': len(dn_sig),
+            'top_upregulated': all_up,     # Use ALL significant DEGs for robust integration
+            'top_downregulated': all_dn,   # Use ALL significant DEGs for robust integration
+            'volcano_data': volcano_data
         }

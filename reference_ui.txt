@@ -1,0 +1,1374 @@
+<USER_REQUEST>
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
+  ReferenceLine, BarChart, Bar, Cell, PieChart, Pie,
+  ResponsiveContainer, AreaChart, Area
+} from "recharts";
+import {
+  Activity, Brain, ChevronDown, ChevronRight, Database,
+  Download, FileText, Filter, GitMerge, Layers, Loader2,
+  MessageSquare, Microscope, Search, Settings, Sparkles,
+  Target, TrendingDown, TrendingUp, User, X, Dna, Zap,
+  Copy, Share2, Info, ArrowRight, Plus, Star, Sun, Moon,
+  Monitor, Bell, Command, RotateCcw, Maximize2, Minimize2,
+  FlaskConical, CheckCircle, Circle, Play, Menu
+} from "lucide-react";
+
+// ─── MOCK DATA ────────────────────────────────────────────────────────────────
+const MOCK = {
+  BRCA: {
+    mutation: {
+      total_mutations: 93748, total_patients: 1044, unique_genes_mutated: 18423,
+      top_genes: [
+        { gene: "TP53", freq: 37.2, count: 388 }, { gene: "PIK3CA", freq: 35.6, count: 372 },
+        { gene: "CDH1", freq: 14.1, count: 147 }, { gene: "GATA3", freq: 13.8, count: 144 },
+        { gene: "MAP3K1", freq: 11.4, count: 119 }, { gene: "MLL3", freq: 9.7, count: 101 },
+        { gene: "PTEN", freq: 8.3, count: 87 }, { gene: "PIK3R1", freq: 7.9, count: 82 },
+        { gene: "AKT1", freq: 6.2, count: 65 }, { gene: "RUNX1", freq: 5.8, count: 61 },
+      ],
+      variant_types: { "Missense": 52341, "Nonsense": 8924, "Frameshift": 10394, "Splice Site": 4821, "Inframe": 5847, "Other": 11421 },
+      median_tmb: 1.63, mean_tmb: 2.41,
+    },
+    expression: {
+      total_genes_tested: 500, significant_degs: 143,
+      upregulated_count: 87, downregulated_count: 56,
+      top_upregulated: ["ERBB2","MKI67","TOP2A","PCNA","CCND1","CDK4","MYC","VEGFA","AURKA","BUB1"],
+      top_downregulated: ["ESR1","PGR","FOXA1","GATA3","TFF1","SCUBE2","RABEP1","NAT1","CA12","MLPH"],
+    },
+    integration: {
+      mutated_and_upregulated: ["TP53","PIK3CA","MYC"],
+      mutated_and_downregulated: ["PTEN","CDH1"],
+      mutated_only: ["GATA3","MAP3K1","AKT1","RUNX1"],
+      deg_only: ["ERBB2","CCND1","ESR1","PGR","MKI67"],
+      priority_targets: ["TP53","PIK3CA","MYC"],
+      total_priority: 48,
+      hypothesis: "Convergent signals in TP53, PIK3CA, and MYC suggest potential oncogenic driver roles in BRCA, with implications for DNA damage response and PI3K/AKT signaling pathways."
+    }
+  },
+  SKCM: {
+    mutation: {
+      total_mutations: 312841, total_patients: 448, unique_genes_mutated: 22187,
+      top_genes: [
+        { gene: "BRAF", freq: 51.8, count: 232 }, { gene: "NRAS", freq: 27.9, count: 125 },
+        { gene: "TP53", freq: 22.1, count: 99 }, { gene: "PTEN", freq: 18.4, count: 82 },
+        { gene: "TTN", freq: 15.2, count: 68 }, { gene: "MUC16", freq: 14.7, count: 66 },
+        { gene: "CDKN2A", freq: 12.3, count: 55 }, { gene: "NF1", freq: 11.8, count: 53 },
+        { gene: "RB1", freq: 9.6, count: 43 }, { gene: "ARID1A", freq: 8.4, count: 38 },
+      ],
+      variant_types: { "Missense": 181234, "Nonsense": 24312, "Frameshift": 27157, "Splice Site": 12841, "Inframe": 8234, "Other": 59063 },
+      median_tmb: 14.8, mean_tmb: 22.3,
+    },
+    expression: {
+      total_genes_tested: 500, significant_degs: 198,
+      upregulated_count: 121, downregulated_count: 77,
+      top_upregulated: ["BRAF","MITF","SOX10","DCT","MLANA","TYR","PMEL","CDK4","MDM2","MCM2"],
+      top_downregulated: ["CDKN2A","PTEN","RB1","CASP8","RASSF1","PTPRD","LATS1","NDRG2","DKK3","TFPI2"],
+    },
+    integration: {
+      mutated_and_upregulated: ["BRAF","NRAS","MITF","CDK4"],
+      mutated_and_downregulated: ["PTEN","CDKN2A","RB1"],
+      mutated_only: ["TP53","TTN","NF1","MUC16"],
+      deg_only: ["SOX10","DCT","MLANA","TYR","PMEL"],
+      priority_targets: ["BRAF","NRAS","MITF","CDK4"],
+      total_priority: 62,
+      hypothesis: "BRAF V600E and NRAS Q61R mutations drive MAPK pathway activation detectable through coordinated transcriptional upregulation of melanocytic programs in SKCM."
+    }
+  }
+};
+
+// Generate volcano data
+function genVolcano(cancer) {
+  const up = MOCK[cancer].expression.top_upregulated;
+  const dn = MOCK[cancer].expression.top_downregulated;
+  const pts = [];
+  for (let i = 0; i < 420; i++) {
+    const lfc = (Math.random() - 0.5) * 9;
+    const negLogP = Math.random() * 6 * (Math.abs(lfc) > 1.5 ? 1.4 : 0.6);
+    const sig = Math.abs(lfc) > 1 && negLogP > 1.3;
+    pts.push({ x: +lfc.toFixed(3), y: +negLogP.toFixed(3), gene: `G${i}`, sig, dir: lfc > 0 ? "up" : "dn" });
+  }
+  up.forEach(g => pts.push({ x: +(1.8 + Math.random() * 2.8).toFixed(3), y: +(2.5 + Math.random() * 5).toFixed(3), gene: g, sig: true, dir: "up", named: true }));
+  dn.forEach(g => pts.push({ x: +(-1.8 - Math.random() * 2.8).toFixed(3), y: +(2.5 + Math.random() * 5).toFixed(3), gene: g, sig: true, dir: "dn", named: true }));
+  return pts;
+}
+
+// TMB histogram
+function genTMB(cancer) {
+  const med = MOCK[cancer].mutation.median_tmb;
+  const scale = cancer === "SKCM" ? 8 : 1;
+  return Array.from({ length: 24 }, (_, i) => ({
+    x: +(i * scale * 0.6).toFixed(1),
+    y: Math.round(180 * Math.exp(-0.5 * Math.pow((i - 3) / 4, 2)) + Math.random() * 20)
+  }));
+}
+
+// Network nodes for multi-omics canvas
+function genNodes(cancer) {
+  const int = MOCK[cancer].integration;
+  const center = { id: "center", x: 50, y: 50, r: 28, type: "hub", label: "MULTI-OMICS", sublabel: "Convergence", color: "#06B6D4" };
+  const nodes = [center];
+  const addRing = (items, type, color, rx, ry, spread) => {
+    items.forEach((gene, i) => {
+      const angle = (i / items.length) * Math.PI * 2 - Math.PI / 2;
+      nodes.push({ id: gene, x: rx + Math.cos(angle) * spread, y: ry + Math.sin(angle) * spread * 0.62, r: 16, type, label: gene, color });
+    });
+  };
+  addRing(int.mutated_and_upregulated, "mut_up", "#10B981", 50, 50, 28);
+  addRing(int.mutated_and_downregulated, "mut_dn", "#EF4444", 50, 50, 22);
+  addRing(int.mutated_only.slice(0, 4), "mut", "#06B6D4", 50, 50, 38);
+  addRing(int.deg_only.slice(0, 5), "deg", "#8B5CF6", 50, 50, 42);
+  return nodes;
+}
+
+// ─── THEME SYSTEM ─────────────────────────────────────────────────────────────
+const THEMES = {
+  dark: {
+    bg: "#050A12", bg2: "#080E1A", surface: "#0C1524", surface2: "#111E30",
+    surface3: "#162236", border: "rgba(6,182,212,0.12)", borderMid: "rgba(6,182,212,0.22)",
+    borderStrong: "rgba(6,182,212,0.4)", text: "#E8F4FD", textMid: "#8BAAB8",
+    textDim: "#4A6A7A", cyan: "#06B6D4", cyanGlow: "rgba(6,182,212,0.2)",
+    emerald: "#10B981", red: "#EF4444", violet: "#8B5CF6", amber: "#F59E0B",
+    gridLine: "rgba(6,182,212,0.06)", scanLine: "rgba(6,182,212,0.03)",
+  },
+  light: {
+    bg: "#F0F4F8", bg2: "#E8EFF5", surface: "#FFFFFF", surface2: "#F5F8FB",
+    surface3: "#EBF2F7", border: "rgba(6,182,212,0.18)", borderMid: "rgba(6,182,212,0.3)",
+    borderStrong: "rgba(6,182,212,0.55)", text: "#0F2030", textMid: "#486070",
+    textDim: "#8AAAB8", cyan: "#0891B2", cyanGlow: "rgba(8,145,178,0.12)",
+    emerald: "#059669", red: "#DC2626", violet: "#7C3AED", amber: "#D97706",
+    gridLine: "rgba(8,145,178,0.08)", scanLine: "rgba(8,145,178,0.04)",
+  }
+};
+
+// ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
+function GlobalStyles({ t }) {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; overflow: hidden; }
+      body {
+        font-family: 'Inter', sans-serif;
+        background: ${t.bg};
+        color: ${t.text};
+        -webkit-font-smoothing: antialiased;
+        transition: background 0.4s ease, color 0.3s ease;
+      }
+      ::-webkit-scrollbar { width: 3px; height: 3px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: ${t.borderMid}; border-radius: 2px; }
+      .mono { font-family: 'JetBrains Mono', monospace; }
+      @keyframes scanY { 0%{transform:translateY(-100%)} 100%{transform:translateY(100vh)} }
+      @keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+      @keyframes spin { to{transform:rotate(360deg)} }
+      @keyframes pulse { 0%,100%{opacity:0.5} 50%{opacity:1} }
+      @keyframes ripple { 0%{transform:scale(0.8);opacity:0.8} 100%{transform:scale(2.2);opacity:0} }
+      @keyframes jitter {
+        0%,100%{transform:translate(0,0)}
+        10%{transform:translate(-0.5px,0.5px)}
+        20%{transform:translate(0.5px,-0.5px)}
+        30%{transform:translate(-0.5px,-0.5px)}
+        40%{transform:translate(0.5px,0.5px)}
+        50%{transform:translate(-0.5px,0.5px)}
+        60%{transform:translate(0.5px,-0.5px)}
+        70%{transform:translate(0,0.5px)}
+        80%{transform:translate(-0.5px,0)}
+        90%{transform:translate(0.5px,0.5px)}
+      }
+      @keyframes float {
+        0%,100%{transform:translateY(0px)}
+        33%{transform:translateY(-4px)}
+        66%{transform:translateY(2px)}
+      }
+      @keyframes nodeAppear { from{opacity:0;r:0} to{opacity:1} }
+      @keyframes lineGrow { from{stroke-dashoffset:200} to{stroke-dashoffset:0} }
+      @keyframes waveFlow {
+        0%{stroke-dashoffset:0}
+        100%{stroke-dashoffset:-60}
+      }
+      @keyframes rotateRing { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+      @keyframes rotateRingRev { from{transform:rotate(0deg)} to{transform:rotate(-360deg)} }
+      @keyframes countUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes glowPulse { 0%,100%{filter:drop-shadow(0 0 4px currentColor)} 50%{filter:drop-shadow(0 0 12px currentColor)} }
+      @keyframes slideInRight { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
+      @keyframes slideInLeft { from{opacity:0;transform:translateX(-20px)} to{opacity:1;transform:translateX(0)} }
+      @keyframes networkPulse { 0%,100%{stroke-opacity:0.3} 50%{stroke-opacity:0.8} }
+      .fade-up { animation: fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) both; }
+      .fade-up-1 { animation: fadeUp 0.45s 0.06s cubic-bezier(0.16,1,0.3,1) both; }
+      .fade-up-2 { animation: fadeUp 0.45s 0.12s cubic-bezier(0.16,1,0.3,1) both; }
+      .fade-up-3 { animation: fadeUp 0.45s 0.18s cubic-bezier(0.16,1,0.3,1) both; }
+      .fade-up-4 { animation: fadeUp 0.45s 0.24s cubic-bezier(0.16,1,0.3,1) both; }
+      .jitter { animation: jitter 0.3s ease; }
+      .node-float { animation: float 6s ease-in-out infinite; }
+      select, input, textarea {
+        background: ${t.surface2}; border: 1px solid ${t.border};
+        border-radius: 6px; color: ${t.text}; font-family: 'Inter', sans-serif;
+        font-size: 12px; padding: 6px 10px; outline: none; transition: border-color 0.2s;
+      }
+      select:focus, input:focus, textarea:focus { border-color: ${t.borderStrong}; }
+      select option { background: ${t.surface2}; }
+      button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; outline: none; }
+    `}</style>
+  );
+}
+
+// ─── ANIMATED BACKGROUND ──────────────────────────────────────────────────────
+function ScientificBackground({ t }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" }}>
+      {/* Grid */}
+      <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+        <defs>
+          <pattern id="smallGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke={t.gridLine} strokeWidth="0.5" />
+          </pattern>
+          <pattern id="largeGrid" width="200" height="200" patternUnits="userSpaceOnUse">
+            <rect width="200" height="200" fill="url(#smallGrid)" />
+            <path d="M 200 0 L 0 0 0 200" fill="none" stroke={t.borderMid} strokeWidth="0.5" opacity="0.4" />
+          </pattern>
+          <radialGradient id="centerGlow" cx="50%" cy="40%" r="50%">
+            <stop offset="0%" stopColor={t.cyan} stopOpacity="0.06" />
+            <stop offset="100%" stopColor={t.cyan} stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#largeGrid)" />
+        <rect width="100%" height="100%" fill="url(#centerGlow)" />
+      </svg>
+      {/* Scan line */}
+      <div style={{ position: "absolute", left: 0, right: 0, height: 1, background: `linear-gradient(90deg,transparent,${t.cyan}33,transparent)`, animation: "scanY 12s linear infinite", top: 0 }} />
+      {/* Atmospheric glow */}
+      <div style={{ position: "absolute", top: "20%", left: "50%", transform: "translate(-50%,-50%)", width: 800, height: 400, borderRadius: "50%", background: `radial-gradient(ellipse, ${t.cyanGlow} 0%, transparent 70%)`, pointerEvents: "none" }} />
+    </div>
+  );
+}
+
+// ─── TOP NAVIGATION ───────────────────────────────────────────────────────────
+const NAV_ITEMS = [
+  { id: "overview", label: "Research" },
+  { id: "mutation", label: "Analyze" },
+  { id: "expression", label: "Explore" },
+  { id: "integration", label: "Multi-Omics" },
+  { id: "synthesis", label: "AI Synthesis" },
+  { id: "reports", label: "Reports" },
+];
+
+function TopNav({ page, setPage, cancer, setCancer, theme, setTheme, t, onCmdOpen }) {
+  const [dataOpen, setDataOpen] = useState(false);
+  return (
+    <header style={{
+      position: "fixed", top: 0, left: 0, right: 0, height: 48, zIndex: 200,
+      background: `${t.bg}EE`, backdropFilter: "blur(16px)",
+      borderBottom: `1px solid ${t.border}`,
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "0 20px", transition: "background 0.4s"
+    }}>
+      {/* Logo */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div style={{ position: "relative", width: 28, height: 28 }}>
+          <svg viewBox="0 0 28 28" style={{ width: 28, height: 28 }}>
+            <circle cx="14" cy="14" r="13" fill="none" stroke={t.cyan} strokeWidth="1" opacity="0.6" />
+            <circle cx="14" cy="14" r="8" fill="none" stroke={t.cyan} strokeWidth="1.5" />
+            <circle cx="14" cy="14" r="3" fill={t.cyan} />
+            <circle cx="14" cy="6" r="2" fill={t.emerald} />
+            <circle cx="22" cy="18" r="2" fill={t.violet} />
+            <circle cx="6" cy="18" r="2" fill={t.amber} />
+            <line x1="14" y1="11" x2="14" y2="8" stroke={t.emerald} strokeWidth="1" />
+            <line x1="14" y1="17" x2="20" y2="20" stroke={t.violet} strokeWidth="1" />
+            <line x1="14" y1="17" x2="8" y2="20" stroke={t.amber} strokeWidth="1" />
+          </svg>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: t.text, letterSpacing: "-0.02em", lineHeight: 1 }}>OmniOnco <span style={{ color: t.cyan }}>AI</span></div>
+          <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em", textTransform: "uppercase", lineHeight: 1, marginTop: 1 }}>Research Intelligence</div>
+        </div>
+      </div>
+
+      {/* Nav items */}
+      <nav style={{ display: "flex", alignItems: "center", gap: 2, position: "absolute", left: "50%", transform: "translateX(-50%)" }}>
+        {NAV_ITEMS.map(({ id, label }) => (
+          <button key={id} onClick={() => setPage(id)} style={{
+            padding: "5px 14px", borderRadius: 5, fontSize: 12, fontWeight: 500,
+            background: page === id ? `${t.cyanGlow}` : "transparent",
+            color: page === id ? t.cyan : t.textMid,
+            border: page === id ? `1px solid ${t.borderMid}` : "1px solid transparent",
+            transition: "all 0.15s",
+          }}
+            onMouseEnter={e => { if (page !== id) { e.target.style.color = t.text; e.target.style.background = `${t.surface2}88`; } }}
+            onMouseLeave={e => { if (page !== id) { e.target.style.color = t.textMid; e.target.style.background = "transparent"; } }}
+          >{label}</button>
+        ))}
+      </nav>
+
+      {/* Right controls */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        {/* Dataset selector */}
+        <div style={{ position: "relative" }}>
+          <button onClick={() => setDataOpen(!dataOpen)} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "5px 10px",
+            background: t.surface2, border: `1px solid ${t.borderMid}`, borderRadius: 6,
+            color: t.cyan, fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace",
+            transition: "all 0.15s"
+          }}>
+            <Database size={12} />
+            {cancer}
+            <ChevronDown size={11} style={{ transition: "transform 0.2s", transform: dataOpen ? "rotate(180deg)" : "rotate(0)" }} />
+          </button>
+          {dataOpen && (
+            <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: 4, zIndex: 300, minWidth: 180, boxShadow: `0 16px 40px rgba(0,0,0,0.4)` }}>
+              {[{ id: "BRCA", name: "Breast Cancer", patients: 1044 }, { id: "SKCM", name: "Skin Melanoma", patients: 448 }].map(ds => (
+                <button key={ds.id} onClick={() => { setCancer(ds.id); setDataOpen(false); }} style={{
+                  width: "100%", textAlign: "left", padding: "8px 12px", borderRadius: 6,
+                  background: cancer === ds.id ? t.cyanGlow : "transparent",
+                  border: `1px solid ${cancer === ds.id ? t.borderMid : "transparent"}`,
+                  display: "flex", flexDirection: "column", gap: 1, transition: "all 0.1s"
+                }}>
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: cancer === ds.id ? t.cyan : t.text }}>{ds.id}</span>
+                  <span style={{ fontSize: 10, color: t.textMid }}>{ds.name} · {ds.patients.toLocaleString()} patients</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Search */}
+        <button onClick={onCmdOpen} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 6, color: t.textMid, fontSize: 11 }}>
+          <Search size={12} />
+          <span style={{ display: "none" }}>Search</span>
+          <kbd style={{ fontSize: 9, padding: "1px 4px", background: t.surface3, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textDim, fontFamily: "inherit" }}>⌘K</kbd>
+        </button>
+
+        {/* Theme */}
+        <button onClick={() => setTheme(th => th === "dark" ? "light" : "dark")} style={{ width: 30, height: 30, borderRadius: 6, background: t.surface2, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: t.textMid, transition: "all 0.15s" }}>
+          {theme === "dark" ? <Sun size={13} /> : <Moon size={13} />}
+        </button>
+
+        {/* AI Indicator */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", background: `${t.violet}18`, border: `1px solid ${t.violet}44`, borderRadius: 6 }}>
+          <div style={{ width: 5, height: 5, borderRadius: "50%", background: t.violet, animation: "pulse 2s infinite" }} />
+          <span style={{ fontSize: 10, color: t.violet, fontWeight: 600, letterSpacing: "0.05em" }}>AI</span>
+        </div>
+
+        <button style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${t.cyan}55, ${t.violet}55)`, border: `1px solid ${t.borderMid}`, display: "flex", alignItems: "center", justifyContent: "center", color: t.text }}>
+          <User size={13} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// ─── GENE INTELLIGENCE PANEL ──────────────────────────────────────────────────
+function GenePanel({ gene, cancer, t, onClose }) {
+  const mut = MOCK[cancer].mutation;
+  const exp = MOCK[cancer].expression;
+  const int = MOCK[cancer].integration;
+  const gData = mut.top_genes.find(g => g.gene === gene) || { gene, freq: 0, count: 0 };
+  const isUp = exp.top_upregulated.includes(gene);
+  const isDn = exp.top_downregulated.includes(gene);
+  const isMutUp = int.mutated_and_upregulated.includes(gene);
+  const isMutDn = int.mutated_and_downregulated.includes(gene);
+  const isPriority = int.priority_targets.includes(gene);
+  const lfc = isUp ? (1.2 + Math.random() * 2).toFixed(2) : isDn ? (-1.2 - Math.random() * 2).toFixed(2) : "0.00";
+  const pval = (Math.random() * 0.001).toExponential(2);
+
+  return (
+    <div style={{
+      position: "absolute", right: 12, top: 12, bottom: 12, width: 300,
+      background: `${t.surface}F0`, border: `1px solid ${t.borderMid}`,
+      borderRadius: 10, display: "flex", flexDirection: "column", zIndex: 100,
+      backdropFilter: "blur(20px)", animation: "slideInRight 0.25s cubic-bezier(0.16,1,0.3,1)",
+      boxShadow: `0 0 40px ${t.cyanGlow}, -8px 0 40px rgba(0,0,0,0.3)`
+    }}>
+      {/* Header */}
+      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${t.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: t.cyan, letterSpacing: "-0.02em" }}>{gene}</div>
+            <div style={{ fontSize: 10, color: t.textMid, marginTop: 1 }}>
+              {gene === "TP53" ? "Tumor Protein p53" : gene === "PIK3CA" ? "PI3K Catalytic Subunit" : gene === "BRAF" ? "B-Raf Proto-oncogene" : gene === "NRAS" ? "Neuroblastoma RAS" : `${gene} Gene`}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {isPriority && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 3, background: `${t.amber}22`, border: `1px solid ${t.amber}55`, color: t.amber, letterSpacing: "0.06em" }}>HIGH PRIORITY</span>}
+            <button onClick={onClose} style={{ width: 22, height: 22, borderRadius: 4, background: t.surface3, border: `1px solid ${t.border}`, color: t.textMid, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={11} /></button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Mutation */}
+        <Section title="MUTATION" color={t.cyan} t={t}>
+          <DataRow label="Frequency" value={`${gData.freq}%`} mono t={t} />
+          <DataRow label="Patients" value={gData.count} mono t={t} />
+          <DataRow label="Classification" value="Missense · Nonsense" t={t} />
+        </Section>
+
+        {/* Expression */}
+        {(isUp || isDn) && (
+          <Section title="EXPRESSION" color={isUp ? t.emerald : t.red} t={t}>
+            <DataRow label="log₂ Fold Change" value={`${lfc > 0 ? "+" : ""}${lfc}`} color={isUp ? t.emerald : t.red} mono t={t} />
+            <DataRow label="p-value" value={pval} mono t={t} />
+            <DataRow label="Direction" value={isUp ? "↑ Upregulated" : "↓ Downregulated"} color={isUp ? t.emerald : t.red} t={t} />
+          </Section>
+        )}
+
+        {/* Integrated */}
+        <Section title="INTEGRATED SIGNAL" color={t.violet} t={t}>
+          <DataRow label="Signal" value={isMutUp ? "Mutation + Upregulation" : isMutDn ? "Mutation + Downregulation" : "Mutation only"} color={isMutUp ? t.emerald : isMutDn ? t.red : t.cyan} t={t} />
+          <DataRow label="Research Priority" value={isPriority ? "High" : "Medium"} color={isPriority ? t.amber : t.textMid} t={t} />
+        </Section>
+
+        {/* AI */}
+        <div style={{ padding: "10px 12px", background: `${t.violet}12`, border: `1px solid ${t.violet}33`, borderRadius: 8 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: t.violet, letterSpacing: "0.1em", marginBottom: 6 }}>AI INTERPRETATION</div>
+          <p style={{ fontSize: 11, color: t.textMid, lineHeight: 1.7 }}>
+            {gene} shows {gData.freq > 20 ? "strong convergent signal" : "notable genomic activity"} with {gData.freq}% mutation frequency{(isUp || isDn) ? ` and significant ${isUp ? "upregulation" : "downregulation"}` : ""}, suggesting {isPriority ? "potential oncogenic driver function" : "candidate status"} in {cancer}.
+          </p>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ padding: "12px 16px", borderTop: `1px solid ${t.border}`, display: "flex", gap: 6 }}>
+        <Btn t={t} color={t.cyan} small>Add to Report</Btn>
+        <Btn t={t} color={t.violet} small ghost>Ask AI</Btn>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, color, children, t }) {
+  return (
+    <div>
+      <div style={{ fontSize: 9, fontWeight: 700, color, letterSpacing: "0.1em", marginBottom: 6 }}>{title}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>{children}</div>
+    </div>
+  );
+}
+function DataRow({ label, value, color, mono, t }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", borderRadius: 5, background: t.surface3 }}>
+      <span style={{ fontSize: 11, color: t.textMid }}>{label}</span>
+      <span className={mono ? "mono" : ""} style={{ fontSize: 11, fontWeight: 600, color: color || t.text }}>{value}</span>
+    </div>
+  );
+}
+
+// ─── BUTTONS ──────────────────────────────────────────────────────────────────
+function Btn({ children, t, color, ghost, small, onClick, disabled, icon: Icon }) {
+  const c = color || t.cyan;
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      display: "inline-flex", alignItems: "center", gap: 5,
+      padding: small ? "5px 10px" : "8px 16px",
+      fontSize: small ? 11 : 12, fontWeight: 600, borderRadius: 6,
+      background: ghost ? "transparent" : `${c}22`,
+      border: `1px solid ${ghost ? t.border : c + "55"}`,
+      color: ghost ? t.textMid : c,
+      transition: "all 0.15s", opacity: disabled ? 0.5 : 1,
+    }}
+      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.background = `${c}33`; e.currentTarget.style.borderColor = c; e.currentTarget.style.color = ghost ? t.text : c; } }}
+      onMouseLeave={e => { e.currentTarget.style.background = ghost ? "transparent" : `${c}22`; e.currentTarget.style.borderColor = ghost ? t.border : `${c}55`; e.currentTarget.style.color = ghost ? t.textMid : c; }}
+    >
+      {Icon && <Icon size={small ? 11 : 13} />}{children}
+    </button>
+  );
+}
+
+// ─── MULTI-OMICS NETWORK CANVAS ───────────────────────────────────────────────
+function NetworkCanvas({ cancer, t, onGeneSelect, selectedGene }) {
+  const nodes = useMemo(() => genNodes(cancer), [cancer]);
+  const [tick, setTick] = useState(0);
+  const [hoveredNode, setHoveredNode] = useState(null);
+  const animRef = useRef();
+
+  useEffect(() => {
+    let frame;
+    const animate = () => { setTick(k => k + 1); frame = requestAnimationFrame(animate); };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const center = nodes[0];
+  const others = nodes.slice(1);
+
+  const TYPE_COLORS = {
+    mut_up: t.emerald, mut_dn: t.red, mut: t.cyan, deg: t.violet, hub: t.cyan
+  };
+
+  const nodeJitter = (id, axis) => {
+    const seed = id.charCodeAt(0) * 137.5 + id.charCodeAt(id.length - 1) * 41.3;
+    const f = axis === "x" ? 0.8 : 1.2;
+    return Math.sin(tick * 0.02 + seed) * f;
+  };
+
+  return (
+    <svg viewBox="0 0 100 100" style={{ width: "100%", height: "100%", overflow: "visible" }} preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="1.5" result="coloredBlur" />
+          <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+        <filter id="glowStrong">
+          <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+          <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+        <radialGradient id="hubGrad" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={t.cyan} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={t.cyan} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* Orbital rings */}
+      {[22, 34, 44].map((r, i) => (
+        <circle key={r} cx="50" cy="50" r={r} fill="none" stroke={t.cyan} strokeWidth="0.15" strokeDasharray={i === 0 ? "2 3" : i === 1 ? "1 4" : "0.5 6"} opacity={0.25}
+          style={{ transformOrigin: "50px 50px", animation: `${i % 2 === 0 ? "rotateRing" : "rotateRingRev"} ${40 + i * 20}s linear infinite` }}
+        />
+      ))}
+
+      {/* Connection lines */}
+      {others.map((n, i) => {
+        const nx = n.x + nodeJitter(n.id, "x");
+        const ny = n.y + nodeJitter(n.id, "y");
+        const isSelected = selectedGene && (n.id === selectedGene || center.id === selectedGene);
+        const isHovered = hoveredNode === n.id;
+        const col = TYPE_COLORS[n.type] || t.cyan;
+        const opacity = selectedGene ? (n.id === selectedGene ? 0.9 : 0.1) : (isHovered ? 0.7 : 0.25);
+        return (
+          <line key={n.id} x1="50" y1="50" x2={nx} y2={ny}
+            stroke={col} strokeWidth={isSelected || isHovered ? 0.5 : 0.2}
+            opacity={opacity} strokeDasharray="2 2"
+            style={{ animation: `networkPulse ${3 + i * 0.4}s ease-in-out infinite` }}
+          />
+        );
+      })}
+
+      {/* Hub center */}
+      <circle cx="50" cy="50" r="12" fill="url(#hubGrad)" filter="url(#glowStrong)" />
+      <circle cx="50" cy="50" r="10" fill={`${t.bg}CC`} stroke={t.cyan} strokeWidth="0.8" />
+      <circle cx="50" cy="50" r="6" fill={`${t.cyan}44`} />
+      <circle cx="50" cy="50" r="3" fill={t.cyan} filter="url(#glow)" />
+      <text x="50" y="26" textAnchor="middle" fill={t.cyan} fontSize="2.2" fontWeight="700" fontFamily="'JetBrains Mono',monospace" opacity="0.8">MULTI-OMICS</text>
+      <text x="50" y="29" textAnchor="middle" fill={t.textDim} fontSize="1.6" fontFamily="Inter" opacity="0.7">Convergence Hub</text>
+
+      {/* Gene nodes */}
+      {others.map((n, i) => {
+        const nx = n.x + nodeJitter(n.id, "x");
+        const ny = n.y + nodeJitter(n.id, "y");
+        const col = TYPE_COLORS[n.type] || t.cyan;
+        const isSelected = selectedGene === n.id;
+        const isHovered = hoveredNode === n.id;
+        const rScale = isSelected ? 1.3 : isHovered ? 1.15 : 1;
+        const opacity = selectedGene ? (isSelected ? 1 : 0.3) : (isHovered ? 1 : 0.75);
+        const r = (n.r / 10) * rScale;
+        return (
+          <g key={n.id} transform={`translate(${nx},${ny})`} onClick={() => onGeneSelect(n.id)} style={{ cursor: "pointer" }}
+            onMouseEnter={() => setHoveredNode(n.id)} onMouseLeave={() => setHoveredNode(null)}>
+            {isSelected && <circle cx="0" cy="0" r={r * 2.5} fill={col} opacity="0.08" style={{ animation: "ripple 2s ease-out infinite" }} />}
+            <circle cx="0" cy="0" r={r * 1.8} fill={col} opacity="0.08" />
+            <circle cx="0" cy="0" r={r} fill={`${t.bg}CC`} stroke={col} strokeWidth={isSelected ? 0.8 : 0.5} opacity={opacity} filter={isSelected || isHovered ? "url(#glow)" : "none"} style={{ transition: "r 0.2s, stroke-width 0.2s" }} />
+            <circle cx="0" cy="0" r={r * 0.45} fill={col} opacity={opacity} style={{ animation: `float ${5 + i * 0.7}s ease-in-out infinite` }} />
+            <text x="0" y={r + 2.2} textAnchor="middle" fill={isSelected ? col : t.textMid} fontSize="1.8" fontWeight={isSelected ? "700" : "500"} fontFamily="'JetBrains Mono',monospace" opacity={opacity} style={{ pointerEvents: "none" }}>{n.label}</text>
+          </g>
+        );
+      })}
+
+      {/* Legend */}
+      {[{ type: "mut_up", label: "Mut + Up" }, { type: "mut_dn", label: "Mut + Down" }, { type: "mut", label: "Mutation" }, { type: "deg", label: "Expression" }].map(({ type, label }, i) => (
+        <g key={type} transform={`translate(${1.5 + i * 22.5}, 97)`}>
+          <circle cx="0" cy="-0.5" r="1.2" fill={TYPE_COLORS[type]} opacity="0.8" />
+          <text x="2.2" y="0.5" fill={t.textDim} fontSize="1.8" fontFamily="Inter">{label}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+// ─── OVERVIEW / RESEARCH PAGE ─────────────────────────────────────────────────
+function OverviewPage({ cancer, t, setPage }) {
+  const mut = MOCK[cancer].mutation;
+  const exp = MOCK[cancer].expression;
+  const int = MOCK[cancer].integration;
+  const [selectedGene, setSelectedGene] = useState(null);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr 260px", gridTemplateRows: "1fr", height: "100%", gap: 0 }}>
+      {/* LEFT PANEL */}
+      <div style={{ borderRight: `1px solid ${t.border}`, padding: "16px 16px", display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
+        <div className="fade-up">
+          <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>OMNIONCO AI</div>
+          <h1 style={{ fontSize: 26, fontWeight: 800, color: t.text, lineHeight: 1.1, letterSpacing: "-0.03em", marginBottom: 6 }}>
+            Research<br /><span style={{ color: t.cyan }}>Intelligence</span>
+          </h1>
+          <p style={{ fontSize: 11, color: t.textMid, lineHeight: 1.7, marginBottom: 12 }}>From molecular signals to research hypotheses.</p>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <Btn t={t} color={t.cyan} onClick={() => setPage("mutation")} icon={ArrowRight}>Start Analysis</Btn>
+            <Btn t={t} ghost>Explore Dataset</Btn>
+          </div>
+        </div>
+
+        {/* Key stats */}
+        <div className="fade-up-1" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          {[
+            { label: cancer, sub: cancer === "BRCA" ? "Breast Cancer" : "Skin Melanoma", value: null, color: t.cyan },
+            { label: mut.total_patients.toLocaleString(), sub: "Patients", value: null },
+            { label: mut.unique_genes_mutated.toLocaleString(), sub: "Gene Loci", value: null },
+            { label: <span style={{ color: t.emerald }}>Analysis Ready</span>, sub: "Status", value: null },
+          ].map((s, i) => (
+            <div key={i} style={{ padding: "8px 10px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 7 }}>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: s.color || t.text, lineHeight: 1 }}>{s.label}</div>
+              <div style={{ fontSize: 10, color: t.textDim, marginTop: 2 }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Pipeline */}
+        <div className="fade-up-2">
+          <div style={{ fontSize: 9, fontWeight: 700, color: t.textDim, letterSpacing: "0.1em", marginBottom: 8 }}>RESEARCH PIPELINE</div>
+          {[
+            { label: "Dataset", sub: `${cancer} · ${mut.total_patients} patients`, status: "done", color: t.cyan },
+            { label: "Mutation Analysis", sub: "Somatic variants & TMB", status: "done", color: t.emerald },
+            { label: "Gene Expression", sub: "DEGs & pathways", status: "active", color: t.cyan },
+            { label: "Multi-Omics Integration", sub: "Convergence analysis", status: "pending", color: t.violet },
+            { label: "AI Synthesis", sub: "Biological interpretation", status: "pending", color: t.violet },
+          ].map(({ label, sub, status, color }, i) => (
+            <div key={label} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "7px 0", borderBottom: `1px solid ${t.border}` }}>
+              <div style={{ marginTop: 1, flexShrink: 0 }}>
+                {status === "done" ? <CheckCircle size={13} color={t.emerald} /> : status === "active" ? <div style={{ width: 13, height: 13, borderRadius: "50%", border: `2px solid ${t.cyan}`, borderTopColor: "transparent", animation: "spin 1s linear infinite" }} /> : <Circle size={13} color={t.border} />}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, fontWeight: 500, color: status !== "pending" ? t.text : t.textMid }}>{label}</div>
+                <div style={{ fontSize: 9, color: t.textDim }}>{sub}</div>
+              </div>
+              {status === "done" && <span style={{ fontSize: 9, color: t.emerald, fontWeight: 600 }}>Done</span>}
+              {status === "active" && <span style={{ fontSize: 9, color: t.cyan, fontWeight: 600, animation: "pulse 2s infinite" }}>Running</span>}
+            </div>
+          ))}
+        </div>
+
+        {/* Priority targets */}
+        <div className="fade-up-3">
+          <div style={{ fontSize: 9, fontWeight: 700, color: t.textDim, letterSpacing: "0.1em", marginBottom: 8 }}>PRIORITY TARGETS</div>
+          {int.priority_targets.map((g, i) => (
+            <div key={g} onClick={() => setSelectedGene(g === selectedGene ? null : g)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", marginBottom: 4, borderRadius: 6, background: selectedGene === g ? `${t.cyan}15` : t.surface2, border: `1px solid ${selectedGene === g ? t.borderMid : t.border}`, cursor: "pointer", transition: "all 0.15s" }}>
+              <span className="mono" style={{ fontSize: 9, color: t.textDim, width: 14 }}>0{i + 1}</span>
+              <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: selectedGene === g ? t.cyan : t.text, flex: 1 }}>{g}</span>
+              <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: `${t.amber}22`, color: t.amber, fontWeight: 700 }}>HIGH</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* CENTER CANVAS */}
+      <div style={{ position: "relative", display: "flex", flexDirection: "column" }}>
+        {/* Canvas labels */}
+        <div style={{ position: "absolute", top: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 24, zIndex: 10 }}>
+          {[{ label: "MUTATION", sub: "Somatic variants", color: t.emerald, icon: Dna }, { label: "EXPRESSION", sub: "Gene expression", color: t.cyan, icon: Activity }, { label: "INTEGRATION", sub: "Multi-omics signals", color: t.violet, icon: GitMerge }].map(({ label, sub, color, icon: Icon }) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: `${t.bg}CC`, border: `1px solid ${t.border}`, borderRadius: 6 }}>
+              <Icon size={11} color={color} />
+              <div>
+                <div style={{ fontSize: 9, fontWeight: 700, color, letterSpacing: "0.08em" }}>{label}</div>
+                <div style={{ fontSize: 8, color: t.textDim }}>{sub}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Network */}
+        <div style={{ flex: 1, padding: "52px 20px 16px", position: "relative" }}>
+          <NetworkCanvas cancer={cancer} t={t} onGeneSelect={g => setSelectedGene(g === selectedGene ? null : g)} selectedGene={selectedGene} />
+        </div>
+
+        {/* Bottom metrics bar */}
+        <div style={{ borderTop: `1px solid ${t.border}`, padding: "10px 20px", display: "flex", gap: 24, justifyContent: "center" }}>
+          {[
+            { label: "Convergent Genes", value: int.mutated_and_upregulated.length + int.mutated_and_downregulated.length, color: t.cyan },
+            { label: "Priority Targets", value: int.total_priority, color: t.amber },
+            { label: "Significant DEGs", value: exp.significant_degs, color: t.violet },
+            { label: "Total Mutations", value: mut.total_mutations.toLocaleString(), color: t.emerald },
+          ].map(({ label, value, color }) => (
+            <div key={label} style={{ textAlign: "center" }}>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
+              <div style={{ fontSize: 9, color: t.textDim, marginTop: 2 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* RIGHT PANEL / Gene Intelligence */}
+      <div style={{ borderLeft: `1px solid ${t.border}`, position: "relative" }}>
+        {selectedGene ? (
+          <GenePanel gene={selectedGene} cancer={cancer} t={t} onClose={() => setSelectedGene(null)} />
+        ) : (
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, height: "100%", overflowY: "auto" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: t.textDim, letterSpacing: "0.1em" }}>AI INSIGHTS</div>
+            <div style={{ padding: 12, background: `${t.violet}10`, border: `1px solid ${t.violet}33`, borderRadius: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <Brain size={12} color={t.violet} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: t.violet }}>Biological Interpretation</span>
+              </div>
+              <p style={{ fontSize: 11, color: t.textMid, lineHeight: 1.7 }}>{int.hypothesis}</p>
+            </div>
+            <div style={{ fontSize: 10, color: t.textMid, textAlign: "center", padding: "20px 0" }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>◎</div>
+              <div>Select a gene node to open Gene Intelligence</div>
+            </div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: t.textDim, letterSpacing: "0.1em" }}>DISCOVER</div>
+            {["CONNECT", "SYNTHESIZE", "ACCELERATE"].map(w => (
+              <div key={w} style={{ fontSize: 8, color: t.textDim, letterSpacing: "0.15em", textAlign: "center", opacity: 0.4 }}>{w}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── MUTATION ANALYSIS PAGE ───────────────────────────────────────────────────
+function MutationPage({ cancer, t }) {
+  const mut = MOCK[cancer].mutation;
+  const tmbData = genTMB(cancer);
+  const varData = Object.entries(mut.variant_types).map(([name, value]) => ({ name, value }));
+  const VCOLS = [t.cyan, t.emerald, t.violet, t.amber, t.red, t.textMid];
+
+  return (
+    <div style={{ height: "100%", overflow: "auto", padding: "20px 24px" }}>
+      {/* Header row */}
+      <div className="fade-up" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Mutation Landscape · {cancer}</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: t.text, letterSpacing: "-0.02em" }}>Somatic Mutation Analysis</h2>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn t={t} ghost icon={Download}>Export</Btn>
+          <Btn t={t} color={t.cyan}>Generate Report</Btn>
+        </div>
+      </div>
+
+      {/* Stats strip */}
+      <div className="fade-up-1" style={{ display: "flex", gap: 0, marginBottom: 20, border: `1px solid ${t.border}`, borderRadius: 8, overflow: "hidden" }}>
+        {[
+          { label: "Total Mutations", value: mut.total_mutations.toLocaleString(), color: t.text },
+          { label: "Patients", value: mut.total_patients.toLocaleString(), color: t.text },
+          { label: "Unique Genes", value: mut.unique_genes_mutated.toLocaleString(), color: t.text },
+          { label: "Median TMB", value: mut.median_tmb, color: t.cyan },
+          { label: "Mean TMB", value: mut.mean_tmb, color: t.cyan },
+        ].map(({ label, value, color }, i) => (
+          <div key={label} style={{ flex: 1, padding: "12px 16px", borderRight: i < 4 ? `1px solid ${t.border}` : "none", background: t.surface }}>
+            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color, animation: "countUp 0.5s ease both", animationDelay: `${i * 0.08}s` }}>{value}</div>
+            <div style={{ fontSize: 10, color: t.textDim, marginTop: 2 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Main layout */}
+      <div className="fade-up-2" style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16 }}>
+        {/* Top genes chart */}
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8 }}>
+          <div style={{ padding: "14px 18px", borderBottom: `1px solid ${t.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>Top Mutated Genes</div>
+              <div style={{ fontSize: 10, color: t.textDim }}>Mutation frequency across cohort</div>
+            </div>
+            <Btn t={t} ghost small icon={Filter}>Filter</Btn>
+          </div>
+          <div style={{ padding: "16px 18px" }}>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={mut.top_genes} layout="vertical" margin={{ left: 0, right: 32, top: 4, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={t.gridLine} horizontal={false} />
+                <XAxis type="number" tick={{ fill: t.textDim, fontSize: 10, fontFamily: "JetBrains Mono" }} tickLine={false} axisLine={false} unit="%" domain={[0, 60]} />
+                <YAxis dataKey="gene" type="category" tick={{ fill: t.textMid, fontSize: 11, fontFamily: "'JetBrains Mono',monospace", fontWeight: 600 }} width={68} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, fontSize: 12, fontFamily: "Inter" }} formatter={(v, n, p) => [`${v}%`, "Frequency"]} labelStyle={{ color: t.cyan, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }} cursor={{ fill: t.cyanGlow }} />
+                <Bar dataKey="freq" radius={[0, 4, 4, 0]} maxBarSize={20} animationDuration={1200} animationEasing="cubic-bezier(0.16,1,0.3,1)">
+                  {mut.top_genes.map((_, i) => <Cell key={i} fill={i < 2 ? t.cyan : i < 5 ? t.emerald : t.textDim} fillOpacity={1 - i * 0.035} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Variant pie */}
+          <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text, marginBottom: 12 }}>Variant Classification</div>
+            <ResponsiveContainer width="100%" height={140}>
+              <PieChart>
+                <Pie data={varData} dataKey="value" cx="50%" cy="50%" innerRadius={40} outerRadius={62} paddingAngle={2} animationDuration={1000}>
+                  {varData.map((_, i) => <Cell key={i} fill={VCOLS[i]} />)}
+                </Pie>
+                <Tooltip contentStyle={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 11 }} formatter={(v) => [v.toLocaleString(), "Count"]} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {varData.map(({ name, value }, i) => (
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: 2, background: VCOLS[i], flexShrink: 0 }} />
+                  <span style={{ color: t.textMid, flex: 1 }}>{name}</span>
+                  <span className="mono" style={{ color: t.textDim }}>{value.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* TMB */}
+          <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: 16, flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text }}>TMB Distribution</div>
+              <div className="mono" style={{ fontSize: 11, color: t.cyan }}>Median: {mut.median_tmb}</div>
+            </div>
+            <ResponsiveContainer width="100%" height={100}>
+              <AreaChart data={tmbData} margin={{ top: 2, right: 4, bottom: 2, left: 0 }}>
+                <defs>
+                  <linearGradient id="tmbG" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={t.cyan} stopOpacity={0.35} />
+                    <stop offset="95%" stopColor={t.cyan} stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={t.gridLine} vertical={false} />
+                <XAxis dataKey="x" tick={{ fill: t.textDim, fontSize: 8, fontFamily: "JetBrains Mono" }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fill: t.textDim, fontSize: 8 }} tickLine={false} axisLine={false} width={24} />
+                <Tooltip contentStyle={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 11 }} />
+                <Area type="monotone" dataKey="y" stroke={t.cyan} strokeWidth={1.5} fill="url(#tmbG)" animationDuration={1200} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── GENE EXPRESSION PAGE ─────────────────────────────────────────────────────
+function ExpressionPage({ cancer, t }) {
+  const exp = MOCK[cancer].expression;
+  const [vData] = useState(() => genVolcano(cancer));
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [selGene, setSelGene] = useState(null);
+
+  const filtered = vData.filter(d => {
+    if (filter === "up") return d.sig && d.dir === "up";
+    if (filter === "dn") return d.sig && d.dir === "dn";
+    if (filter === "sig") return d.sig;
+    return true;
+  }).filter(d => !search || d.gene.toLowerCase().includes(search.toLowerCase()));
+
+  const CustomDot = (props) => {
+    const { cx, cy, payload } = props;
+    if (!cx || !cy) return null;
+    const color = !payload.sig ? `${t.textDim}55` : payload.dir === "up" ? t.emerald : t.red;
+    const r = payload.named ? 5 : payload.sig ? 3 : 2;
+    return (
+      <g onClick={() => payload.named && setSelGene(payload)} style={{ cursor: payload.named ? "pointer" : "default" }}>
+        {payload.named && <circle cx={cx} cy={cy} r={r + 4} fill={color} opacity="0.1" />}
+        <circle cx={cx} cy={cy} r={r} fill={color} opacity={payload.sig ? 0.85 : 0.3} stroke={payload.named ? "#fff" : "none"} strokeWidth={payload.named ? 0.5 : 0} style={{ transition: "r 0.15s", animation: payload.named ? "glowPulse 3s ease-in-out infinite" : "none" }} />
+        {payload.named && <text x={cx} y={cy - r - 3} textAnchor="middle" fill={color} fontSize="7" fontFamily="'JetBrains Mono',monospace" fontWeight="600" style={{ pointerEvents: "none" }}>{payload.gene}</text>}
+      </g>
+    );
+  };
+
+  return (
+    <div style={{ height: "100%", overflow: "auto", padding: "20px 24px" }}>
+      <div className="fade-up" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Gene Expression · {cancer}</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: t.text, letterSpacing: "-0.02em" }}>Differential Expression Analysis</h2>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input placeholder="Search gene..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 160 }} />
+          <select value={filter} onChange={e => setFilter(e.target.value)} style={{ width: "auto" }}>
+            <option value="all">All genes</option>
+            <option value="sig">Significant</option>
+            <option value="up">Upregulated</option>
+            <option value="dn">Downregulated</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="fade-up-1" style={{ display: "flex", gap: 0, marginBottom: 16, border: `1px solid ${t.border}`, borderRadius: 8, overflow: "hidden" }}>
+        {[
+          { label: "Genes Tested", value: exp.total_genes_tested, color: t.text },
+          { label: "Significant DEGs", value: exp.significant_degs, color: t.cyan },
+          { label: "Upregulated", value: exp.upregulated_count, color: t.emerald },
+          { label: "Downregulated", value: exp.downregulated_count, color: t.red },
+        ].map(({ label, value, color }, i) => (
+          <div key={label} style={{ flex: 1, padding: "10px 16px", borderRight: i < 3 ? `1px solid ${t.border}` : "none", background: t.surface }}>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
+            <div style={{ fontSize: 10, color: t.textDim }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="fade-up-2" style={{ display: "grid", gridTemplateColumns: selGene ? "1fr 280px" : "1fr", gap: 16 }}>
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8 }}>
+          <div style={{ padding: "12px 18px", borderBottom: `1px solid ${t.border}` }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text }}>Volcano Plot</div>
+            <div style={{ fontSize: 10, color: t.textDim }}>log₂ Fold Change vs −log₁₀ p-value · Click named genes for details</div>
+          </div>
+          <div style={{ display: "flex", gap: 14, padding: "10px 18px 4px" }}>
+            {[{ color: t.emerald, label: `Upregulated (${exp.upregulated_count})` }, { color: t.red, label: `Downregulated (${exp.downregulated_count})` }, { color: `${t.textDim}55`, label: "Not significant" }].map(({ color, label }) => (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: t.textMid }}>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />{label}
+              </div>
+            ))}
+          </div>
+          <ResponsiveContainer width="100%" height={360}>
+            <ScatterChart margin={{ top: 8, right: 20, bottom: 24, left: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={t.gridLine} />
+              <XAxis dataKey="x" type="number" tick={{ fill: t.textDim, fontSize: 10, fontFamily: "JetBrains Mono" }} tickLine={false} axisLine={{ stroke: t.border }} domain={[-8, 8]} label={{ value: "log₂ Fold Change", position: "insideBottom", offset: -12, fill: t.textDim, fontSize: 10 }} />
+              <YAxis dataKey="y" type="number" tick={{ fill: t.textDim, fontSize: 10 }} tickLine={false} axisLine={{ stroke: t.border }} label={{ value: "−log₁₀(p-value)", angle: -90, position: "insideLeft", offset: 12, fill: t.textDim, fontSize: 10 }} />
+              <ReferenceLine x={1} stroke={t.border} strokeDasharray="4 3" />
+              <ReferenceLine x={-1} stroke={t.border} strokeDasharray="4 3" />
+              <ReferenceLine y={1.3} stroke={t.amber} strokeDasharray="4 3" strokeOpacity={0.5} />
+              <Scatter data={filtered} shape={<CustomDot />} isAnimationActive={false} />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Gene panel */}
+        {selGene && (
+          <div style={{ background: t.surface, border: `1px solid ${t.borderMid}`, borderRadius: 8, overflow: "hidden", animation: "slideInRight 0.25s cubic-bezier(0.16,1,0.3,1)" }}>
+            <div style={{ padding: "12px 14px", borderBottom: `1px solid ${t.border}`, display: "flex", justifyContent: "space-between" }}>
+              <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: selGene.dir === "up" ? t.emerald : t.red }}>{selGene.gene}</div>
+              <button onClick={() => setSelGene(null)} style={{ background: "transparent", color: t.textMid, display: "flex" }}><X size={14} /></button>
+            </div>
+            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { label: "log₂FC", value: `${selGene.x > 0 ? "+" : ""}${selGene.x}`, color: selGene.dir === "up" ? t.emerald : t.red },
+                { label: "−log₁₀(p)", value: selGene.y.toFixed(3), color: t.text },
+                { label: "Direction", value: selGene.dir === "up" ? "↑ Upregulated" : "↓ Downregulated", color: selGene.dir === "up" ? t.emerald : t.red },
+                { label: "Significant", value: selGene.sig ? "Yes" : "No", color: selGene.sig ? t.emerald : t.textMid },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", background: t.surface2, borderRadius: 6 }}>
+                  <span style={{ fontSize: 11, color: t.textMid }}>{label}</span>
+                  <span className="mono" style={{ fontSize: 11, fontWeight: 600, color }}>{value}</span>
+                </div>
+              ))}
+              <div style={{ padding: "10px", background: `${t.violet}12`, border: `1px solid ${t.violet}33`, borderRadius: 7, marginTop: 4 }}>
+                <div style={{ fontSize: 9, color: t.violet, fontWeight: 700, marginBottom: 4 }}>AI NOTE</div>
+                <p style={{ fontSize: 10, color: t.textMid, lineHeight: 1.7 }}>
+                  {selGene.gene} shows {selGene.dir === "up" ? "transcriptional upregulation" : "downregulation"} (log₂FC {selGene.x > 0 ? "+" : ""}{selGene.x}), suggesting {selGene.dir === "up" ? "potential oncogenic activation" : "possible tumor suppressor silencing"}.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── MULTI-OMICS PAGE ─────────────────────────────────────────────────────────
+function MultiOmicsPage({ cancer, t }) {
+  const int = MOCK[cancer].integration;
+  const [sel, setSel] = useState(null);
+
+  const TYPE_INFO = [
+    { key: "mutated_and_upregulated", label: "Mutated + Upregulated", desc: "Potential oncogenic drivers", color: t.emerald },
+    { key: "mutated_and_downregulated", label: "Mutated + Downregulated", desc: "Loss-of-function candidates", color: t.red },
+    { key: "mutated_only", label: "Mutation Only", desc: "Mutation-supported candidates", color: t.cyan },
+    { key: "deg_only", label: "Expression Only", desc: "Transcriptional candidates", color: t.violet },
+  ];
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", height: "100%", overflow: "hidden" }}>
+      {/* Canvas area */}
+      <div style={{ display: "flex", flexDirection: "column", borderRight: `1px solid ${t.border}` }}>
+        <div style={{ padding: "14px 20px", borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 3 }}>Multi-Omics Integration · {cancer}</div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: t.text, letterSpacing: "-0.02em" }}>Molecular Convergence Map</h2>
+        </div>
+        <div style={{ flex: 1, position: "relative" }}>
+          <NetworkCanvas cancer={cancer} t={t} onGeneSelect={g => setSel(g === sel ? null : g)} selectedGene={sel} />
+        </div>
+        {/* Bottom metrics */}
+        <div style={{ borderTop: `1px solid ${t.border}`, padding: "10px 20px", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 0 }}>
+          {[
+            { label: "Mut + Up", value: int.mutated_and_upregulated.length, color: t.emerald },
+            { label: "Mut + Down", value: int.mutated_and_downregulated.length, color: t.red },
+            { label: "Mut Only", value: int.mutated_only.length, color: t.cyan },
+            { label: "DEG Only", value: int.deg_only.length, color: t.violet },
+          ].map(({ label, value, color }, i) => (
+            <div key={label} style={{ textAlign: "center", borderRight: i < 3 ? `1px solid ${t.border}` : "none", padding: "4px 0" }}>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
+              <div style={{ fontSize: 9, color: t.textDim }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right analysis panel */}
+      <div style={{ overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* AI Hypothesis */}
+        <div style={{ padding: 14, background: `${t.violet}10`, border: `1px solid ${t.violet}33`, borderRadius: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <Brain size={12} color={t.violet} />
+            <span style={{ fontSize: 10, fontWeight: 700, color: t.violet }}>AI HYPOTHESIS</span>
+          </div>
+          <p style={{ fontSize: 11, color: t.textMid, lineHeight: 1.7 }}>{int.hypothesis}</p>
+          <div style={{ fontSize: 9, color: t.textDim, marginTop: 8 }}>AI-generated research interpretation · Not clinical guidance</div>
+        </div>
+
+        {/* Priority targets */}
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: t.textDim, letterSpacing: "0.1em", marginBottom: 8 }}>PRIORITY TARGETS · {int.total_priority} TOTAL</div>
+          {int.priority_targets.map((g, i) => (
+            <div key={g} onClick={() => setSel(g === sel ? null : g)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 6, borderRadius: 7, background: sel === g ? `${t.cyan}12` : t.surface, border: `1px solid ${sel === g ? t.borderMid : t.border}`, cursor: "pointer", transition: "all 0.15s" }}>
+              <span className="mono" style={{ fontSize: 9, color: t.textDim, width: 16 }}>0{i + 1}</span>
+              <div style={{ flex: 1 }}>
+                <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: sel === g ? t.cyan : t.text }}>{g}</span>
+                <div style={{ fontSize: 9, color: t.textDim, marginTop: 1 }}>Mutation + Expression · {cancer}</div>
+              </div>
+              <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: `${t.amber}18`, color: t.amber, fontWeight: 700 }}>HIGH</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Category breakdown */}
+        {TYPE_INFO.map(({ key, label, desc, color }) => (
+          <div key={key}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color }}>{label}</div>
+              <div className="mono" style={{ fontSize: 10, color: t.textDim }}>{int[key]?.length || 0}</div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {(int[key] || []).map(g => (
+                <span key={g} onClick={() => setSel(g === sel ? null : g)} className="mono" style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 4, background: `${color}12`, border: `1px solid ${color}33`, color: sel === g ? color : t.textMid, cursor: "pointer", transition: "all 0.1s" }}>{g}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── AI SYNTHESIS PAGE ────────────────────────────────────────────────────────
+function SynthesisPage({ cancer, t }) {
+  const int = MOCK[cancer].integration;
+  const mut = MOCK[cancer].mutation;
+  const exp = MOCK[cancer].expression;
+  const [chat, setChat] = useState([{ role: "ai", text: `OmniOnco Copilot initialized for ${cancer} analysis. I have analyzed ${mut.total_mutations.toLocaleString()} somatic mutations and ${exp.significant_degs} differential expression events. What would you like to explore?` }]);
+  const [input, setInput] = useState("");
+  const chatRef = useRef();
+
+  const RESPONSES = {
+    default: `Based on the ${cancer} convergence analysis, ${int.priority_targets.slice(0, 2).join(" and ")} emerge as strong research candidates with co-occurring somatic mutations and transcriptional dysregulation.`,
+    tp53: "TP53 encodes the p53 tumor suppressor. Its mutations impair cell cycle checkpoint control and apoptotic signaling. In BRCA, TP53 alterations (37.2%) are associated with triple-negative and basal-like subtypes and correlate with genome instability signatures.",
+    braf: "BRAF V600E (51.8% in SKCM) constitutively activates the MAPK/ERK cascade. This drives melanocyte proliferation and suppresses apoptosis. BRAF inhibitors demonstrate clinical efficacy, though resistance mechanisms involving NRAS and NF1 remain active research areas.",
+    pik3ca: "PIK3CA hotspot mutations hyperactivate PI3K/AKT/mTOR signaling. In BRCA, PIK3CA mutations (35.6%) co-occur with hormone receptor positivity and confer potential sensitivity to PI3K pathway inhibitors.",
+    convergence: `Multi-omics convergence identified ${int.mutated_and_upregulated.length + int.mutated_and_downregulated.length} genes with dual mutation and expression signals. Mutated + upregulated: ${int.mutated_and_upregulated.join(", ")}. These represent the highest-confidence research priorities.`,
+    summarize: `${cancer} Analysis Summary:\n• ${mut.total_mutations.toLocaleString()} somatic mutations · ${mut.total_patients} patients\n• Top driver: ${mut.top_genes[0].gene} (${mut.top_genes[0].freq}%)\n• ${exp.significant_degs} significant DEGs (${exp.upregulated_count} up, ${exp.downregulated_count} down)\n• ${int.total_priority} priority targets via multi-omics convergence\n• Hypothesis: ${int.hypothesis.slice(0, 80)}...`,
+    next: `Recommended next steps for ${cancer}:\n1. Functional validation of ${int.priority_targets[0]} convergent signal\n2. Pathway enrichment analysis of the ${exp.upregulated_count} upregulated genes\n3. Survival analysis stratified by ${mut.top_genes[0].gene} mutation status\n4. Co-mutation analysis across top driver genes`,
+  };
+
+  const sendMsg = () => {
+    if (!input.trim()) return;
+    const msg = input.toLowerCase();
+    setChat(c => [...c, { role: "user", text: input }]);
+    setInput("");
+    setTimeout(() => {
+      let resp = RESPONSES.default;
+      if (msg.includes("tp53")) resp = RESPONSES.tp53;
+      else if (msg.includes("braf")) resp = RESPONSES.braf;
+      else if (msg.includes("pik3ca")) resp = RESPONSES.pik3ca;
+      else if (msg.includes("convergence") || msg.includes("convergent")) resp = RESPONSES.convergence;
+      else if (msg.includes("summar")) resp = RESPONSES.summarize;
+      else if (msg.includes("next") || msg.includes("investigate")) resp = RESPONSES.next;
+      setChat(c => [...c, { role: "ai", text: resp }]);
+      setTimeout(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, 50);
+    }, 600);
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", height: "100%", overflow: "hidden" }}>
+      {/* Main synthesis */}
+      <div style={{ borderRight: `1px solid ${t.border}`, overflow: "auto", padding: "20px 24px" }}>
+        <div className="fade-up" style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>AI Synthesis · {cancer}</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: t.text, letterSpacing: "-0.02em" }}>Research Interpretation</h2>
+        </div>
+
+        {/* AI report sections */}
+        {[
+          { title: "KEY RESEARCH FINDINGS", color: t.cyan, content: null, items: [
+            { n: "01", gene: mut.top_genes[0].gene, finding: `Strong convergent signal — ${mut.top_genes[0].freq}% mutation frequency with significant expression dysregulation`, priority: "High" },
+            { n: "02", gene: mut.top_genes[1].gene, finding: `High mutation frequency (${mut.top_genes[1].freq}%) with supporting expression signal`, priority: "High" },
+            { n: "03", gene: `${int.total_priority} priority targets`, finding: "Identified through multi-omics convergence analysis", priority: "Medium" },
+          ]},
+        ].map(({ title, color, items }) => (
+          <div key={title} className="fade-up-1" style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color, letterSpacing: "0.1em", marginBottom: 10 }}>{title}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {items.map(({ n, gene, finding, priority }) => (
+                <div key={n} style={{ display: "flex", gap: 12, padding: "12px 14px", background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8 }}>
+                  <span className="mono" style={{ fontSize: 11, color: t.textDim, paddingTop: 1 }}>{n}</span>
+                  <div style={{ flex: 1 }}>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 2 }}>{gene}</div>
+                    <div style={{ fontSize: 11, color: t.textMid, lineHeight: 1.6 }}>{finding}</div>
+                  </div>
+                  <span style={{ fontSize: 9, padding: "2px 6px", height: "fit-content", borderRadius: 3, background: priority === "High" ? `${t.amber}18` : `${t.textDim}18`, color: priority === "High" ? t.amber : t.textDim, fontWeight: 700, flexShrink: 0 }}>{priority}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {/* Hypothesis + Confidence */}
+        <div className="fade-up-2" style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 14, marginBottom: 16 }}>
+          <div style={{ padding: 16, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: t.violet, letterSpacing: "0.1em", marginBottom: 8 }}>RESEARCH HYPOTHESIS</div>
+            <p style={{ fontSize: 12, color: t.textMid, lineHeight: 1.8 }}>{int.hypothesis}</p>
+          </div>
+          <div style={{ padding: 16, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: t.amber, letterSpacing: "0.1em", marginBottom: 8 }}>CONFIDENCE</div>
+            <div>
+              <div className="mono" style={{ fontSize: 28, fontWeight: 700, color: t.amber, lineHeight: 1 }}>HIGH</div>
+              <div style={{ fontSize: 10, color: t.textDim, marginTop: 4 }}>Multi-signal support</div>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <div style={{ height: 4, background: t.surface2, borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: "82%", background: `linear-gradient(90deg, ${t.emerald}, ${t.amber})`, borderRadius: 2 }} />
+              </div>
+              <div style={{ fontSize: 9, color: t.textDim, marginTop: 3, textAlign: "right" }}>82%</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="fade-up-3" style={{ display: "flex", gap: 8 }}>
+          <Btn t={t} color={t.cyan} icon={FileText}>Generate Full Report</Btn>
+          <Btn t={t} ghost icon={Download}>Export</Btn>
+          <Btn t={t} ghost icon={Share2}>Share</Btn>
+        </div>
+
+        <div style={{ marginTop: 16, padding: "10px 14px", background: t.surface, border: `1px solid ${t.border}`, borderRadius: 7, fontSize: 10, color: t.textDim, lineHeight: 1.6 }}>
+          AI-generated interpretation for research support only. All findings require experimental validation and do not constitute clinical diagnosis or treatment recommendations.
+        </div>
+      </div>
+
+      {/* Copilot */}
+      <div style={{ display: "flex", flexDirection: "column", background: t.surface }}>
+        <div style={{ padding: "12px 16px", borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: `${t.violet}22`, border: `1px solid ${t.violet}44`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <MessageSquare size={12} color={t.violet} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>OmniOnco Copilot</div>
+            <div style={{ fontSize: 9, color: t.violet }}>Research assistant · {cancer}</div>
+          </div>
+          <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: t.emerald, animation: "pulse 2s infinite" }} />
+        </div>
+
+        <div ref={chatRef} style={{ flex: 1, overflowY: "auto", padding: "14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {chat.map((m, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", animation: "fadeUp 0.25s ease both" }}>
+              <div style={{ maxWidth: "88%", padding: "8px 12px", borderRadius: m.role === "user" ? "10px 10px 2px 10px" : "10px 10px 10px 2px", background: m.role === "user" ? `${t.violet}22` : t.surface2, border: `1px solid ${m.role === "user" ? t.violet + "44" : t.border}`, fontSize: 11, color: t.text, lineHeight: 1.7, whiteSpace: "pre-line" }}>
+                {m.text}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Quick prompts */}
+        <div style={{ padding: "8px 12px", borderTop: `1px solid ${t.border}`, display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {[`Why is ${mut.top_genes[0].gene} a priority?`, "Show convergent genes", "Summarize analysis", "What to investigate next?"].map(p => (
+            <button key={p} onClick={() => { setInput(p); }} style={{ fontSize: 9, padding: "3px 7px", borderRadius: 4, background: t.surface3, border: `1px solid ${t.border}`, color: t.textMid, transition: "all 0.1s" }}
+              onMouseEnter={e => { e.target.style.borderColor = t.violet; e.target.style.color = t.violet; }}
+              onMouseLeave={e => { e.target.style.borderColor = t.border; e.target.style.color = t.textMid; }}
+            >{p}</button>
+          ))}
+        </div>
+
+        <div style={{ padding: "8px 12px", borderTop: `1px solid ${t.border}`, display: "flex", gap: 6 }}>
+          <input placeholder="Ask a research question..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMsg()} style={{ flex: 1, fontSize: 11 }} />
+          <button onClick={sendMsg} style={{ width: 30, height: 30, borderRadius: 6, background: `${t.violet}22`, border: `1px solid ${t.violet}44`, color: t.violet, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <ArrowRight size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── REPORTS PAGE ─────────────────────────────────────────────────────────────
+function ReportsPage({ cancer, t }) {
+  const mut = MOCK[cancer].mutation;
+  const exp = MOCK[cancer].expression;
+  const int = MOCK[cancer].integration;
+
+  return (
+    <div style={{ height: "100%", overflow: "auto", padding: "20px 24px" }}>
+      <div className="fade-up" style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Research Report · {cancer}</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: t.text, letterSpacing: "-0.02em" }}>Multi-Omics Analysis Report</h2>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn t={t} ghost icon={Copy}>Copy</Btn>
+          <Btn t={t} ghost icon={Share2}>Share</Btn>
+          <Btn t={t} color={t.cyan} icon={Download}>Export PDF</Btn>
+        </div>
+      </div>
+
+      <div className="fade-up-1" style={{ maxWidth: 760, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 10, overflow: "hidden" }}>
+        {/* Report header */}
+        <div style={{ padding: "28px 32px", borderBottom: `1px solid ${t.border}`, background: `linear-gradient(135deg, ${t.surface} 60%, ${t.cyanGlow})` }}>
+          <div className="mono" style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.15em", marginBottom: 8 }}>OMNIONCO AI · MULTI-OMICS RESEARCH REPORT</div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: t.text, letterSpacing: "-0.02em", marginBottom: 4 }}>Multi-Omics Analysis: {cancer}</h1>
+          <div style={{ fontSize: 11, color: t.textMid }}>
+            {cancer === "BRCA" ? "Breast Invasive Carcinoma" : "Skin Cutaneous Melanoma"} · TCGA Cohort · {new Date().toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" })}
+          </div>
+          <div style={{ display: "flex", gap: 12, marginTop: 14 }}>
+            {[{ label: "Patients", value: mut.total_patients.toLocaleString() }, { label: "Mutations", value: mut.total_mutations.toLocaleString() }, { label: "DEGs", value: exp.significant_degs }, { label: "Targets", value: int.total_priority }].map(({ label, value }) => (
+              <div key={label} style={{ textAlign: "center", padding: "6px 14px", background: t.surface2, borderRadius: 6, border: `1px solid ${t.border}` }}>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: t.cyan }}>{value}</div>
+                <div style={{ fontSize: 9, color: t.textDim }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Sections */}
+        <div style={{ padding: "24px 32px" }}>
+          {[
+            { title: "Research Objective", color: t.cyan, content: `Identify key oncogenic driver genes in ${cancer === "BRCA" ? "breast cancer" : "skin melanoma"} through integrated mutation and expression analysis.` },
+            { title: "Dataset", color: t.textMid, content: `Source: TCGA / cBioPortal · ${mut.total_patients.toLocaleString()} patients · Modalities: Somatic Mutation (MAF), Gene Expression (RNA-seq)` },
+            { title: "Mutation Findings", color: t.emerald, content: `${mut.total_mutations.toLocaleString()} somatic mutations detected across ${mut.unique_genes_mutated.toLocaleString()} unique gene loci. Top drivers: ${mut.top_genes.slice(0, 5).map(g => `${g.gene} (${g.freq}%)`).join(", ")}. Median TMB: ${mut.median_tmb} mutations/Mb.` },
+            { title: "Expression Findings", color: t.violet, content: `${exp.significant_degs} significant DEGs identified from ${exp.total_genes_tested} tested. Upregulated: ${exp.top_upregulated.slice(0, 5).join(", ")}. Downregulated: ${exp.top_downregulated.slice(0, 5).join(", ")}.` },
+            { title: "Multi-Omics Integration", color: t.cyan, content: `${int.mutated_and_upregulated.length} genes show convergent mutation + upregulation: ${int.mutated_and_upregulated.join(", ")}. ${int.mutated_and_downregulated.length} genes show mutation + downregulation: ${int.mutated_and_downregulated.join(", ")}.` },
+            { title: "Priority Research Targets", color: t.amber, content: `${int.priority_targets.join(", ")} — identified by multi-omics convergence. Total priority targets: ${int.total_priority}.` },
+            { title: "AI Biological Interpretation", color: t.violet, content: int.hypothesis, ai: true },
+          ].map(({ title, color, content, ai }) => (
+            <div key={title} style={{ marginBottom: 20, paddingBottom: 20, borderBottom: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>{title}</div>
+              {ai ? (
+                <div style={{ padding: "12px 14px", background: `${t.violet}0C`, border: `1px solid ${t.violet}22`, borderRadius: 7 }}>
+                  <p style={{ fontSize: 12, color: t.textMid, lineHeight: 1.8 }}>{content}</p>
+                </div>
+              ) : <p style={{ fontSize: 12, color: t.textMid, lineHeight: 1.8 }}>{content}</p>}
+            </div>
+          ))}
+
+          <div style={{ padding: "10px 14px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 7, fontSize: 10, color: t.textDim, lineHeight: 1.6 }}>
+            This report was generated by OmniOnco AI for research purposes only. All findings represent computational analysis of publicly available TCGA data and require experimental validation. This is not a clinical report.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── COMMAND PALETTE ──────────────────────────────────────────────────────────
+function CommandPalette({ t, onClose, setPage, setCancer }) {
+  const [q, setQ] = useState("");
+  const CMDS = [
+    { label: "Research Overview", id: "overview", icon: Dna, desc: "Multi-omics research canvas" },
+    { label: "Mutation Analysis", id: "mutation", icon: Activity, desc: "Somatic mutation landscape" },
+    { label: "Gene Expression", id: "expression", icon: Zap, desc: "Volcano plot · DEG analysis" },
+    { label: "Multi-Omics Integration", id: "integration", icon: GitMerge, desc: "Convergence map" },
+    { label: "AI Synthesis", id: "synthesis", icon: Brain, desc: "Research interpretation · Copilot" },
+    { label: "Reports", id: "reports", icon: FileText, desc: "Export research report" },
+    { label: "Switch to BRCA", id: null, icon: Database, desc: "Breast Cancer dataset", action: () => { setCancer("BRCA"); onClose(); } },
+    { label: "Switch to SKCM", id: null, icon: Database, desc: "Skin Melanoma dataset", action: () => { setCancer("SKCM"); onClose(); } },
+  ];
+  const filtered = CMDS.filter(c => !q || c.label.toLowerCase().includes(q.toLowerCase()) || c.desc.toLowerCase().includes(q.toLowerCase()));
+
+  useEffect(() => {
+    const h = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 100, backdropFilter: "blur(6px)", animation: "fadeIn 0.15s ease" }} onClick={onClose}>
+      <div style={{ width: 560, background: t.surface, border: `1px solid ${t.borderStrong}`, borderRadius: 12, overflow: "hidden", boxShadow: `0 0 0 1px ${t.border}, 0 32px 80px rgba(0,0,0,0.5), 0 0 60px ${t.cyanGlow}`, animation: "fadeUp 0.2s cubic-bezier(0.16,1,0.3,1)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: `1px solid ${t.border}` }}>
+          <Search size={15} color={t.textMid} />
+          <input autoFocus placeholder="Search pages, genes, commands..." value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, background: "transparent", border: "none", fontSize: 14, color: t.text, padding: 0, outline: "none" }} />
+          <kbd style={{ fontSize: 10, padding: "2px 6px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textDim }}>ESC</kbd>
+        </div>
+        <div style={{ maxHeight: 360, overflowY: "auto", padding: 6 }}>
+          {filtered.map(({ label, id, icon: Icon, desc, action }) => (
+            <div key={label} onClick={() => { if (action) action(); else { setPage(id); onClose(); } }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 12px", borderRadius: 7, cursor: "pointer", transition: "background 0.1s" }}
+              onMouseEnter={e => e.currentTarget.style.background = t.surface2}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <div style={{ width: 30, height: 30, borderRadius: 7, background: t.surface3, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon size={14} color={t.textMid} />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: t.text }}>{label}</div>
+                <div style={{ fontSize: 10, color: t.textDim }}>{desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: "7px 16px", borderTop: `1px solid ${t.border}`, display: "flex", gap: 12 }}>
+          {[["↑↓", "Navigate"], ["↵", "Select"], ["Esc", "Close"]].map(([k, l]) => (
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: t.textDim }}>
+              <kbd style={{ padding: "1px 5px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 3, fontSize: 9 }}>{k}</kbd>{l}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ROOT ─────────────────────────────────────────────────────────────────
+export default function OmniOncoApp() {
+  const [theme, setTheme] = useState("dark");
+  const [page, setPage] = useState("overview");
+  const [cancer, setCancer] = useState("BRCA");
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const t = THEMES[theme];
+
+  // Keyboard shortcut
+  useEffect(() => {
+    const h = e => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setCmdOpen(c => !c); } };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  const PAGES = {
+    overview: <OverviewPage cancer={cancer} t={t} setPage={setPage} />,
+    mutation: <MutationPage cancer={cancer} t={t} />,
+    expression: <ExpressionPage cancer={cancer} t={t} />,
+    integration: <MultiOmicsPage cancer={cancer} t={t} />,
+    synthesis: <SynthesisPage cancer={cancer} t={t} />,
+    reports: <ReportsPage cancer={cancer} t={t} />,
+  };
+
+  return (
+    <>
+      <GlobalStyles t={t} />
+      <ScientificBackground t={t} />
+      <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+        <TopNav page={page} setPage={setPage} cancer={cancer} setCancer={setCancer} theme={theme} setTheme={setTheme} t={t} onCmdOpen={() => setCmdOpen(true)} />
+        <main style={{ flex: 1, marginTop: 48, overflow: "hidden", position: "relative" }} key={`${page}-${cancer}`}>
+          {PAGES[page] || PAGES.overview}
+        </main>
+
+        {/* Bottom status bar */}
+        <div style={{ height: 24, borderTop: `1px solid ${t.border}`, background: `${t.bg}CC`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", fontSize: 9, color: t.textDim, backdropFilter: "blur(8px)", zIndex: 10 }}>
+          <div style={{ display: "flex", gap: 16 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: t.emerald, display: "inline-block" }} />OMNIONCO AI</span>
+            <span>EXPLORE · ANALYZE · CONNECT · SYNTHESIZE</span>
+          </div>
+          <span style={{ letterSpacing: "0.06em" }}>ADVANCING CANCER RESEARCH THROUGH INTELLIGENCE</span>
+        </div>
+      </div>
+
+      {cmdOpen && <CommandPalette t={t} onClose={() => setCmdOpen(false)} setPage={setPage} setCancer={setCancer} />}
+    </>
+  );
+}   for frontend please try to make according to the backend 
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-08-29T10:24:19+05:30.
+</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>
+The user changed setting `Model Selection` from None to Claude Sonnet 4.6 (Thinking). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+</USER_SETTINGS_CHANGE>

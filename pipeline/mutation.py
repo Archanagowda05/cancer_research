@@ -50,18 +50,28 @@ class MutationAnalyzer:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-    def summarize(self) -> dict:
-        freq = self.get_mutation_frequency(10)
+    def summarize(self, top_n: int = 20) -> dict:
+        freq = self.get_mutation_frequency(top_n)
         tmb = self.get_tumor_mutation_burden()
+        
+        # Get all mutated genes sorted by frequency for deep integration
+        all_freq = self.maf['Hugo_Symbol'].value_counts()
+        all_genes = all_freq.index.tolist()
+        
         return {
             'total_mutations': len(self.maf),
             'total_patients': self.maf['Tumor_Sample_Barcode'].nunique(),
             'unique_genes_mutated': self.maf['Hugo_Symbol'].nunique(),
-            'top_10_genes': freq['Gene'].tolist(),
+            'top_10_genes': freq['Gene'].tolist(),          # integrator compat key
+            'all_mutated_genes': all_genes,                 # NEW: For deep convergence
             'top_10_frequencies': freq['Mutation_Frequency_%'].tolist(),
+            'top_genes': [{'gene': r['Gene'], 'freq': r['Mutation_Frequency_%'],
+                           'count': int(r['Patient_Count'])}
+                          for _, r in freq.iterrows()],     # richer format for UI/API
             'variant_types': self.get_variant_classification().to_dict(),
             'median_tmb': float(tmb.median().round(2)),
             'mean_tmb': float(tmb.mean().round(2)),
+            'tmb_per_patient': tmb.clip(upper=100).tolist(),  # capped list for histogram
         }
 
 if __name__ == '__main__':
