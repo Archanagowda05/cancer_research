@@ -264,7 +264,7 @@ Rules:
 3. Include a Limitations section acknowledging methodological constraints.
 4. Only discuss analyses present in the data below.
 5. Be specific about gene names from the data.
-6. Keep under 400 words.
+6. Keep it between 300 - 400 words.
 
 Report sections (include only if data is present):
   - Key Mutation Findings
