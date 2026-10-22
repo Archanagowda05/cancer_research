@@ -38,71 +38,42 @@ OmniOnco AI is a **full-stack, goal-driven AI agent** that performs end-to-end m
 
 ## 🏗 Architecture
 
-```mermaid
-flowchart TD
-    A["🎯 Research Goal\n+ Cancer Type"] --> B["🧠 AI Planner\n(Llama 3.2 via Ollama)"]
-    B --> C{"🛡️ Validator\nAgent"}
-    C -->|"❌ Invalid Plan"| D{"Retries < 2?"}
-    D -->|Yes| B
-    D -->|No| E["⚡ Fallback\n(Default Plan)"]
-    E --> F
-    C -->|"✅ Valid Plan"| F
-
-    subgraph exec ["⚙️ Execution Pipeline (LangGraph)"]
-        direction TB
-        F["🔬 Mutation\nAnalysis"] --> G["📊 Expression\nAnalysis"]
-        G --> H["🔗 Multi-Omics\nIntegration"]
-        H --> I["📈 Evidence\nRanking"]
-        I --> J["🏥 Clinical\nAnalysis"]
-        J --> K["🛤️ Pathway\nEnrichment"]
-        K --> L["🎯 Biomarker\nExploration"]
-    end
-
-    L --> M["📋 Traceability\nLogger"]
-    M --> N["✍️ AI Synthesizer\n(Llama 3.2)"]
-    N --> O["📄 Research Report\n+ Visualizations"]
-
-    style A fill:#1a1a2e,stroke:#00b4d8,color:#fff
-    style B fill:#1a1a2e,stroke:#9f7aea,color:#fff
-    style C fill:#1a1a2e,stroke:#ed8936,color:#fff
-    style N fill:#1a1a2e,stroke:#9f7aea,color:#fff
-    style O fill:#1a1a2e,stroke:#38a169,color:#fff
+```
+ Research Goal + Cancer Type
+            │
+    ┌───────▼────────┐
+    │  🧠 AI Planner │──── Llama 3.2 via Ollama
+    │  (Intent Parse) │
+    └───────┬────────┘
+            │
+    ┌───────▼────────┐     ❌ retry (max 2×)
+    │ 🛡️ Validator   │────────────┐
+    └───────┬────────┘            │
+            │ ✅                  │
+    ┌───────▼─────────────────────▼──────────┐
+    │        ⚙️ LangGraph Execution Pipeline  │
+    │                                         │
+    │  Mutation ➜ Expression ➜ Integration    │
+    │  ➜ Ranking ➜ Clinical ➜ Pathway ➜ Bio  │
+    └───────────────┬─────────────────────────┘
+                    │
+    ┌───────────────▼───────────────┐
+    │  ✍️ AI Synthesizer + Logger   │
+    └───────────────┬───────────────┘
+                    │
+            📄 Research Report
 ```
 
-### System Overview
-
-```mermaid
-flowchart LR
-    subgraph frontend ["🖥️ Frontend (React 19 + Vite)"]
-        UI["OmniOnco Dashboard\n• Interactive Charts\n• Volcano Plots\n• Gene Rankings\n• AI Chat"]
-    end
-
-    subgraph backend ["⚡ Backend (FastAPI)"]
-        API["REST API\n/mutation  /expression\n/integration  /clinical\n/ranking  /pathway\n/biomarker  /full"]
-    end
-
-    subgraph engine ["🧬 Analysis Engine"]
-        P["Pipeline Modules\n• MutationAnalyzer\n• ExpressionAnalyzer\n• MultiOmicsIntegrator\n• CandidateRanker\n• ClinicalAnalyzer\n• PathwayAnalyzer\n• BiomarkerExplorer"]
-    end
-
-    subgraph ai ["🤖 AI Layer"]
-        LLM["Llama 3.2:3b\n(Ollama Local)"]
-    end
-
-    subgraph data ["📁 Data"]
-        TCGA["TCGA via cBioPortal\n• BRCA (Breast)\n• SKCM (Melanoma)"]
-    end
-
-    UI <-->|HTTP| API
-    API --> P
-    P --> TCGA
-    API <-->|Chat + Synthesis| LLM
-    P -.->|Enrichr API| EXT["🌐 External\nEnrichr"]
-
-    style frontend fill:#0a0f0e,stroke:#00b4d8,color:#fff
-    style backend fill:#0a0f0e,stroke:#38a169,color:#fff
-    style engine fill:#0a0f0e,stroke:#ed8936,color:#fff
-    style ai fill:#0a0f0e,stroke:#9f7aea,color:#fff
+```
+┌──────────────┐    HTTP    ┌──────────────┐         ┌──────────────┐
+│   React 19   │◄──────────►│   FastAPI     │────────►│   Pipeline   │
+│   Frontend   │            │   REST API    │         │   Modules    │
+└──────────────┘            └──────┬───────┘         └──────┬───────┘
+                                   │                        │
+                            ┌──────▼───────┐         ┌──────▼───────┐
+                            │  Llama 3.2   │         │ TCGA Data    │
+                            │  (Ollama)    │         │ (cBioPortal) │
+                            └──────────────┘         └──────────────┘
 ```
 
 ---
@@ -333,8 +304,16 @@ pytest tests/ -v
 
 This project is for **academic and research purposes only**. No clinical diagnostic capability is claimed or implied.
 
+## 👥 Team Zero Geniuses
+
+| | Name | GitHub |
+|---|------|--------|
+| 🧬 | **Archana Gowda** | [@Archanagowda05](https://github.com/Archanagowda05) |
+| 🔬 | **Harshitha B Srinivas** | [@HarshithaBsrinivas](https://github.com/HarshithaBsrinivas) |
+| 🧪 | **Lisha** | [@Lisha167](https://github.com/Lisha167) |
+
 ---
 
 <p align="center">
-  Built with 🧬 by <a href="https://github.com/Archanagowda05">Archana Gowda</a>
+  Built with 🧬 by <strong>Team Zero Geniuses</strong>
 </p>
