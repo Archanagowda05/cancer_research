@@ -38,42 +38,37 @@ OmniOnco AI is a **full-stack, goal-driven AI agent** that performs end-to-end m
 
 ## 🏗 Architecture
 
-```
- Research Goal + Cancer Type
-            │
-    ┌───────▼────────┐
-    │  🧠 AI Planner │──── Llama 3.2 via Ollama
-    │  (Intent Parse) │
-    └───────┬────────┘
-            │
-    ┌───────▼────────┐     ❌ retry (max 2×)
-    │ 🛡️ Validator   │────────────┐
-    └───────┬────────┘            │
-            │ ✅                  │
-    ┌───────▼─────────────────────▼──────────┐
-    │        ⚙️ LangGraph Execution Pipeline  │
-    │                                         │
-    │  Mutation ➜ Expression ➜ Integration    │
-    │  ➜ Ranking ➜ Clinical ➜ Pathway ➜ Bio  │
-    └───────────────┬─────────────────────────┘
-                    │
-    ┌───────────────▼───────────────┐
-    │  ✍️ AI Synthesizer + Logger   │
-    └───────────────┬───────────────┘
-                    │
-            📄 Research Report
-```
+```mermaid
+flowchart LR
+    classDef inputStyle fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef plannerStyle fill:#4c1d95,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef validatorStyle fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#f8fafc;
+    classDef fallbackStyle fill:#831843,stroke:#f472b6,stroke-dasharray: 4 4,color:#f8fafc;
+    classDef pipeStyle fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#f8fafc;
+    classDef logStyle fill:#14532d,stroke:#4ade80,stroke-width:1.5px,color:#f8fafc;
+    classDef synthStyle fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
+    classDef outStyle fill:#042f2e,stroke:#2dd4bf,stroke-width:2px,color:#f8fafc;
 
-```
-┌──────────────┐    HTTP    ┌──────────────┐         ┌──────────────┐
-│   React 19   │◄──────────►│   FastAPI     │────────►│   Pipeline   │
-│   Frontend   │            │   REST API    │         │   Modules    │
-└──────────────┘            └──────┬───────┘         └──────┬───────┘
-                                   │                        │
-                            ┌──────▼───────┐         ┌──────▼───────┐
-                            │  Llama 3.2   │         │ TCGA Data    │
-                            │  (Ollama)    │         │ (cBioPortal) │
-                            └──────────────┘         └──────────────┘
+    A(["🎯 Goal & Cancer Type"]):::inputStyle --> B["🧠 AI Planner<br/>(Llama 3.2)"]:::plannerStyle
+    B --> C{"🛡️ Validator"}:::validatorStyle
+    C -- "❌ Retry (<2)" --> B
+    C -- "❌ Fallback" --> D["⚡ Fallback Plan"]:::fallbackStyle
+    C -- "✅ Valid" --> P1
+    D --> P1
+
+    subgraph Pipeline ["⚙️ LangGraph Execution Flow"]
+        direction LR
+        P1["🔬 Mutation"]:::pipeStyle --> P2["📊 Expression"]:::pipeStyle
+        P2 --> P3["🔗 Integration"]:::pipeStyle
+        P3 --> P4["📈 Ranking"]:::pipeStyle
+        P4 --> P5["🏥 Clinical"]:::pipeStyle
+        P5 --> P6["🛤️ Pathway"]:::pipeStyle
+        P6 --> P7["🎯 Biomarker"]:::pipeStyle
+    end
+
+    P7 --> L["📋 Logger"]:::logStyle
+    L --> S["✍️ AI Synthesizer<br/>(Llama 3.2)"]:::synthStyle
+    S --> R(["📄 Research Report"]):::outStyle
 ```
 
 ---
@@ -304,16 +299,7 @@ pytest tests/ -v
 
 This project is for **academic and research purposes only**. No clinical diagnostic capability is claimed or implied.
 
-## 👥 Team Zero Geniuses
-
-| | Name | GitHub |
-|---|------|--------|
-| 🧬 | **Archana Gowda** | [@Archanagowda05](https://github.com/Archanagowda05) |
-| 🔬 | **Harshitha B Srinivas** | [@HarshithaBsrinivas](https://github.com/HarshithaBsrinivas) |
-| 🧪 | **Lisha** | [@Lisha167](https://github.com/Lisha167) |
-
----
-
 <p align="center">
-  Built with 🧬 by <strong>Team Zero Geniuses</strong>
+  Built with FRUSTRATION by <strong>Team Zero Geniuses</strong>
+  [@Archanagowda05](https://github.com/Archanagowda05) | [@HarshithaBsrinivas](https://github.com/HarshithaBsrinivas) | [@Lisha167](https://github.com/Lisha167) |
 </p>
