@@ -301,5 +301,4 @@ This project is for **academic and research purposes only**. No clinical diagnos
 
 <p align="center">
   Built with FRUSTRATION by <strong>Team Zero Geniuses</strong>
-  [@Archanagowda05](https://github.com/Archanagowda05) | [@HarshithaBsrinivas](https://github.com/HarshithaBsrinivas) | [@Lisha167](https://github.com/Lisha167) |
 </p>
